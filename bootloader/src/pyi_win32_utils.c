@@ -1,6 +1,6 @@
 /*
  * ****************************************************************************
- * Copyright (c) 2013-2020, PyInstaller Development Team.
+ * Copyright (c) 2013-2023, PyInstaller Development Team.
  *
  * Distributed under the terms of the GNU General Public License (version 2
  * or later) with exception for distributing the bootloader.
@@ -22,12 +22,6 @@
 
 #ifdef _WIN32
 
-/* windows.h will use API for WinServer 2003 with SP1 and WinXP with SP2 */
-#define _WIN32_WINNT 0x0502
-
-/* TODO: use safe string functions */
-#define _CRT_SECURE_NO_WARNINGS 1
-
 #include <windows.h>
 #include <commctrl.h> /* InitCommonControls */
 #include <stdio.h>    /* _fileno */
@@ -36,18 +30,12 @@
 #include <sddl.h>     /* ConvertStringSecurityDescriptorToSecurityDescriptorW */
 
 /* PyInstaller headers. */
-#include "msvc_stdint.h" /* int32_t */
 #include "pyi_global.h"  /* PATH_MAX */
-#include "pyi_archive.h"
-#include "pyi_path.h"
 #include "pyi_utils.h"
 #include "pyi_win32_utils.h"
 
-static HANDLE hCtx = INVALID_HANDLE_VALUE;
-static ULONG_PTR actToken;
-
-#ifndef STATUS_SXS_EARLY_DEACTIVATION
-    #define STATUS_SXS_EARLY_DEACTIVATION 0xC015000F
+#ifndef IO_REPARSE_TAG_SYMLINK
+    #define IO_REPARSE_TAG_SYMLINK 0xA000000CL
 #endif
 
 #define ERROR_STRING_MAX 4096
@@ -98,53 +86,6 @@ char * GetWinErrorString(DWORD error_code) {
     return errorString;
 }
 
-int
-CreateActContext(const char *manifestpath)
-{
-    wchar_t * manifestpath_w;
-    ACTCTXW ctx;
-    BOOL activated;
-    HANDLE k32;
-
-    HANDLE (WINAPI * CreateActCtx)(PACTCTXW pActCtx);
-    BOOL (WINAPI * ActivateActCtx)(HANDLE hActCtx, ULONG_PTR * lpCookie);
-
-    /* Setup activation context */
-    VS("LOADER: manifestpath: %s\n", manifestpath);
-    manifestpath_w = pyi_win32_utils_from_utf8(NULL, manifestpath, 0);
-
-    k32 = LoadLibraryA("kernel32");
-    CreateActCtx = (void*)GetProcAddress(k32, "CreateActCtxW");
-    ActivateActCtx = (void*)GetProcAddress(k32, "ActivateActCtx");
-
-    if (!CreateActCtx || !ActivateActCtx) {
-        VS("LOADER: Cannot find CreateActCtx/ActivateActCtx exports in kernel32.dll\n");
-        return 0;
-    }
-
-    ZeroMemory(&ctx, sizeof(ctx));
-    ctx.cbSize = sizeof(ACTCTX);
-    ctx.lpSource = manifestpath_w;
-    ctx.dwFlags = ACTCTX_FLAG_SET_PROCESS_DEFAULT;
-
-    hCtx = CreateActCtx(&ctx);
-    free(manifestpath_w);
-
-    if (hCtx != INVALID_HANDLE_VALUE) {
-        VS("LOADER: Activation context created\n");
-        activated = ActivateActCtx(hCtx, &actToken);
-
-        if (activated) {
-            VS("LOADER: Activation context activated\n");
-            return 1;
-        }
-    }
-
-    hCtx = INVALID_HANDLE_VALUE;
-    VS("LOADER: Error activating the context: ActivateActCtx: \n%s\n", GetWinErrorString(0));
-    return 0;
-}
-
 /* Convert a wide string to an ANSI string.
  *
  *  Returns a newly allocated buffer containing the ANSI characters terminated by a null
@@ -180,6 +121,10 @@ pyi_win32_wcs_to_mbs(const wchar_t *wstr)
     }
 
     str = (char *)calloc(len + 1, sizeof(char));
+    if (str == NULL) {
+        FATAL_WINERROR("win32_wcs_to_mbs", "Out of memory.\n");
+        return NULL;
+    };
 
     ret = WideCharToMultiByte(CP_ACP,    /* CodePage */
                               0,         /* dwFlags */
@@ -215,6 +160,9 @@ pyi_win32_argv_to_utf8(int argc, wchar_t **wargv)
     char ** argv;
 
     argv = (char **)calloc(argc + 1, sizeof(char *));
+    if (argv == NULL) {
+        return NULL;
+    };
 
     for (i = 0; i < argc; i++) {
         argv[i] = pyi_win32_utils_to_utf8(NULL, wargv[i], 0);
@@ -246,6 +194,9 @@ pyi_win32_wargv_from_utf8(int argc, char **argv)
     wchar_t ** wargv;
 
     wargv = (wchar_t **)calloc(argc + 1, sizeof(wchar_t *));
+    if (wargv == NULL) {
+        return NULL;
+    };
 
     for (i = 0; i < argc; i++) {
         wargv[i] = pyi_win32_utils_from_utf8(NULL, argv[i], 0);
@@ -305,6 +256,10 @@ pyi_win32_utils_to_utf8(char *str, const wchar_t *wstr, size_t len)
         }
 
         output = (char *)calloc(len + 1, sizeof(char));
+        if (output == NULL) {
+            FATAL_WINERROR("win32_utils_to_utf8", "Out of memory.\n");
+            return NULL;
+        };
     }
     else {
         output = str;
@@ -365,6 +320,10 @@ pyi_win32_utils_from_utf8(wchar_t *wstr, const char *str, size_t wlen)
         }
 
         output = (wchar_t *)calloc(wlen + 1, sizeof(wchar_t));
+        if (output == NULL) {
+            FATAL_WINERROR("win32_utils_from_utf8", "Out of memory.\n");
+            return NULL;
+        };
     }
     else {
         output = wstr;
@@ -419,6 +378,54 @@ pyi_win32_utf8_to_mbs(char * dst, const char * src, size_t max)
     }
 }
 
+
+/* Retrieve the SID of the current user.
+ *  Used in a compatibility work-around for wine, which at the time of writing
+ *  (version 5.0.2) does not properly support SID S-1-3-4 (directory owner),
+ *  and therefore user's actual SID must be used instead.
+ *
+ *  Returns SID string on success, NULL on failure. The returned string must
+ *  be freed using LocalFree().
+ */
+static wchar_t *
+_pyi_win32_get_user_sid()
+{
+    HANDLE process_token = INVALID_HANDLE_VALUE;
+    DWORD user_info_size = 0;
+    PTOKEN_USER user_info = NULL;
+    wchar_t *sid = NULL;
+
+    // Get access token for the calling process
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token)) {
+        goto cleanup;
+    }
+    // Get buffer size and allocate buffer
+    if (!GetTokenInformation(process_token, TokenUser, NULL, 0, &user_info_size)) {
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            goto cleanup;
+        }
+    }
+    user_info = (PTOKEN_USER)calloc(1, user_info_size);
+    if (!user_info) {
+        goto cleanup;
+    }
+    // Get user information
+    if (!GetTokenInformation(process_token, TokenUser, user_info, user_info_size, &user_info_size)) {
+        goto cleanup;
+    }
+    // Convert SID to string
+    ConvertSidToStringSidW(user_info->User.Sid, &sid);
+
+    // Cleanup
+cleanup:
+    free(user_info);
+    if (process_token != INVALID_HANDLE_VALUE) {
+        CloseHandle(process_token);
+    }
+
+    return sid;
+}
+
 /* Create a directory at path with restricted permissions.
  *  The directory owner will be the only one with permissions on the created
  *  dir. Calling this function is equivalent to callin chmod(path, 0700) on
@@ -428,12 +435,20 @@ pyi_win32_utf8_to_mbs(char * dst, const char * src, size_t max)
 int
 pyi_win32_mkdir(const wchar_t *path)
 {
-    wchar_t stringSecurityDesc[] = // ACE String :
+    wchar_t *sid = NULL;
+    wchar_t stringSecurityDesc[PATH_MAX];
+
+    // ACE String :
+    sid = _pyi_win32_get_user_sid(); // Resolve user's SID for compatibility with wine
+    _snwprintf(stringSecurityDesc, PATH_MAX,
         L"D:" // DACL (D) :
         L"(A;" // Authorize (A)
         L";FA;" // FILE_ALL_ACCESS (FA)
-        L";;S-1-3-4)"; // For the current directory owner (SID: S-1-3-4)
+        L";;%s)", // For the current user (retrieved SID) or current directory owner (SID: S-1-3-4)
         // no other permissions are granted
+        sid ? sid : L"S-1-3-4");
+    LocalFree(sid); // Must be freed using LocalFree()
+    VS("LOADER: creating directory %S with security string: %S\n", path, stringSecurityDesc);
 
     SECURITY_ATTRIBUTES securityAttr;
     PSECURITY_DESCRIPTOR *lpSecurityDesc;
@@ -453,5 +468,57 @@ pyi_win32_mkdir(const wchar_t *path)
     };
     return 0;
 }
+
+/* Check if the given path is a symbolic link. */
+int pyi_win32_is_symlink(const wchar_t *path)
+{
+    WIN32_FIND_DATAW info;
+    HANDLE ret;
+
+    ret = FindFirstFileExW(path, FindExInfoBasic, &info, FindExSearchNameMatch, NULL, 0);
+    if (ret == INVALID_HANDLE_VALUE) {
+        /* Failed to look up path; assume it is not symbolic link */
+        return 0;
+    }
+    FindClose(ret);
+
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+        if (info.dwReserved0 == IO_REPARSE_TAG_SYMLINK) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* Check if the given path is just a drive letter */
+int pyi_win32_is_drive_root(const wchar_t *path)
+{
+    /* For now, handle just drive letter, optionally followed by the path separator.
+       E.g., "C:" or "Z:\".
+     */
+    size_t len;
+
+    len = wcslen(path);
+    if (len == 2 || len == 3) {
+        /* First character must be a letter */
+        if (!iswalpha(path[0])) {
+            return 0;
+        }
+        /* Second character must be the colon */
+        if (path[1] != L':') {
+            return 0;
+        }
+        /* Third character, if present, must be the Windows directory separator */
+        if (len > 2 && (path[2] != L'\\')) {
+            return 0;
+        }
+
+        return 1;
+    }
+
+    return 0;
+}
+
 
 #endif  /* _WIN32 */

@@ -14,11 +14,11 @@ check "are we bundled?"::
     else:
         print('running in a normal Python process')
 
-When a bundled app starts up, the |bootloader| sets the ``sys.frozen``
+When a bundled app starts up, the bootloader sets the ``sys.frozen``
 attribute and stores the absolute path to the bundle folder in
 ``sys._MEIPASS``. For a one-folder bundle, this is the path to that folder. For
 a one-file bundle, this is the path to the temporary folder created by the
-|bootloader| (see :ref:`How the One-File Program Works`).
+bootloader (see :ref:`How the One-File Program Works`).
 
 When your app is running, it may need to access data files in one of the
 following locations:
@@ -35,7 +35,7 @@ Using ``__file__``
 
 When your program is not bundled, the Python variable ``__file__`` refers to
 the current path of the module it is contained in. When importing a module
-from a bundled script, the |PyInstaller| |bootloader| will set the module's
+from a bundled script, the PyInstaller bootloader will set the module's
 ``__file__`` attribute to the correct path relative to the bundle folder.
 
 For example, if you import ``mypackage.mymodule`` from a bundled script, then
@@ -46,19 +46,90 @@ the following code will get its path (in both the non-bundled and the bundled
 case)::
 
     from os import path
-    path_to_dat = path.join(path.dirname(__file__), 'file.dat')
+    path_to_dat = path.abspath(path.join(path.dirname(__file__), 'file.dat'))
 
-In the bundled main script itself the above might not work, as it is unclear
-where it resides in the package hierarchy. So in when trying to find data files
-relative to the main script, ``sys._MEIPASS`` can be used. The following will
-get the path to a file ``other-file.dat`` next to the main script if not
-bundled and in the bundle folder if it is bundled::
+In the main script (the ``__main__`` module) itself, the ``__file__``
+variable contains path to the script file. In Python 3.8 and earlier,
+this path is either absolute or relative (depending on how the script
+was passed to the ``python`` interpreter), while in Python 3.9 and later,
+it is always an absolute path. In the bundled script, the PyInstaller
+bootloader always sets the ``__file__`` variable inside the ``__main__``
+module to the absolute path inside the bundle directory, as if the
+byte-compiled entry-point script existed there.
+
+For example, if your entry-point script is called ``program.py``, then
+the ``__file__`` attribute inside the bundled script will point to
+``sys._MEIPASS + 'program.py'``. Therefore, locating a data file relative
+to the main script can be either done directly using ``sys._MEIPASS`` or
+via the parent path of the ``__file__`` inside the main script.
+
+The following example will get the path to a file ``other-file.dat``
+located next to the main script if not bundled and inside the bundle folder
+if it is bundled::
 
     from os import path
-    import sys
-    bundle_dir = getattr(sys, '_MEIPASS', path.abspath(path.dirname(__file__)))
+    bundle_dir = path.abspath(path.dirname(__file__))
     path_to_dat = path.join(bundle_dir, 'other-file.dat')
 
+Or, if you'd rather use pathlib_::
+
+    from pathlib import Path
+    path_to_dat = Path(__file__).resolve().with_name("other-file.dat")
+
+.. versionchanged:: 4.3
+
+    Formerly, the ``__file__`` attribute of the entry-point script
+    (the ``__main__`` module) was set to only its basename rather than
+    its full (absolute or relative) path within the bundle directory.
+    Therefore, PyInstaller documentation used to suggest ``sys._MEIPASS``
+    as means for locating resources relative to the bundled entry-point
+    script. Now, ``__file__`` is always set to the absolute full path,
+    and is the preferred way of locating such resources.
+
+
+Placing data files at expected locations inside the bundle
+----------------------------------------------------------
+
+To place the data-files where your code expects them to be (i.e., relative
+to the main script or bundle directory), you can use the **dest** parameter
+of the :option:`--add-data=source:dest <--add-data>` command-line switches.
+Assuming you normally
+use the following code in a file named ``my_script.py`` to locate a file
+``file.dat`` in the same folder::
+
+    from os import path
+    path_to_dat = path.abspath(path.join(path.dirname(__file__), 'file.dat'))
+
+Or the pathlib_ equivalent::
+
+    from pathlib import Path
+    path_to_dat = Path(__file__).resolve().with_name("file.dat")
+
+And ``my_script.py`` is **not** part of a package (not in a folder containing
+an ``__init_.py``), then ``__file__`` will be ``[app root]/my_script.pyc``
+meaning that if you put ``file.dat`` in the root of your package, using::
+
+    PyInstaller --add-data=/path/to/file.dat:.
+
+It will be found correctly at runtime without changing ``my_script.py``.
+
+.. note:: Windows users should use ``;`` instead of ``:`` in the above line.
+
+If ``__file__`` is checked from inside a package or library (say
+``my_library.data``) then ``__file__`` will be
+``[app root]/my_library/data.pyc`` and :option:`--add-data` should mirror that::
+
+    PyInstaller --add-data=/path/to/my_library/file.dat:./my_library
+
+However, in this case it is much easier to switch to :ref:`the spec file
+<Using Spec Files>` and use the
+:func:`PyInstaller.utils.hooks.collect_data_files` helper function::
+
+    from PyInstaller.utils.hooks import collect_data_files
+
+    a = Analysis(...,
+                 datas=collect_data_files("my_library"),
+                 ...)
 
 Using ``sys.executable`` and ``sys.argv[0]``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -98,21 +169,21 @@ then bundled as a one-folder app.
 Then bundle it as a one-file app and launch it directly and also via a
 symbolic link::
 
-	#!/usr/bin/python3
-	import sys, os
-	frozen = 'not'
-	if getattr(sys, 'frozen', False):
-		# we are running in a bundle
-		frozen = 'ever so'
-		bundle_dir = sys._MEIPASS
-	else:
-		# we are running in a normal Python environment
-		bundle_dir = os.path.dirname(os.path.abspath(__file__))
-	print( 'we are',frozen,'frozen')
-	print( 'bundle dir is', bundle_dir )
-	print( 'sys.argv[0] is', sys.argv[0] )
-	print( 'sys.executable is', sys.executable )
-	print( 'os.getcwd is', os.getcwd() )
+    #!/usr/bin/env python3
+    import sys, os
+    frozen = 'not'
+    if getattr(sys, 'frozen', False):
+        # we are running in a bundle
+        frozen = 'ever so'
+        bundle_dir = sys._MEIPASS
+    else:
+        # we are running in a normal Python environment
+        bundle_dir = os.path.dirname(os.path.abspath(__file__))
+    print( 'we are',frozen,'frozen')
+    print( 'bundle dir is', bundle_dir )
+    print( 'sys.argv[0] is', sys.argv[0] )
+    print( 'sys.executable is', sys.executable )
+    print( 'os.getcwd is', os.getcwd() )
 
 
 

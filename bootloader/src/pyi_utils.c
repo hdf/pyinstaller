@@ -1,6 +1,6 @@
 /*
  * ****************************************************************************
- * Copyright (c) 2013-2020, PyInstaller Development Team.
+ * Copyright (c) 2013-2023, PyInstaller Development Team.
  *
  * Distributed under the terms of the GNU General Public License (version 2
  * or later) with exception for distributing the bootloader.
@@ -15,9 +15,6 @@
  * Portable wrapper for some utility functions like getenv/setenv,
  * file path manipulation and other shared data types or functions.
  */
-
-/* TODO: use safe string functions */
-#define _CRT_SECURE_NO_WARNINGS 1
 
 #ifdef _WIN32
     #include <windows.h>
@@ -42,7 +39,6 @@
     #else
         #include <dlfcn.h>
     #endif
-    #include <limits.h>  /* PATH_MAX */
     #include <signal.h>  /* kill, */
     #include <sys/wait.h>
     #include <unistd.h>  /* rmdir, unlink, mkdtemp */
@@ -60,9 +56,6 @@ typedef void (*sighandler_t)(int);
 #include <string.h>
 #include <sys/stat.h> /* struct stat */
 #include <wchar.h>    /* wchar_t */
-#if defined(__APPLE__) && defined(WINDOWED)
-    #include <Carbon/Carbon.h>  /* AppleEventsT */
-#endif
 
 /*
  * Function 'mkdtemp' (make temporary directory) is missing on some *nix platforms:
@@ -82,6 +75,7 @@ typedef void (*sighandler_t)(int);
 #include "pyi_archive.h"
 #include "pyi_utils.h"
 #include "pyi_win32_utils.h"
+#include "pyi_apple_events.h"
 
 /*
  *  global variables that are used to copy argc/argv, so that PyIstaller can manipulate them
@@ -92,18 +86,6 @@ typedef void (*sighandler_t)(int);
  */
 static char **argv_pyi = NULL;
 static int argc_pyi = 0;
-
-/*
- * Watch for OpenDocument AppleEvents and add the files passed in to the
- * sys.argv command line on the Python side.
- *
- * This allows on Mac OS X to open files when a file is dragged and dropped
- * on the App icon in the OS X dock.
- */
-#if defined(__APPLE__) && defined(WINDOWED)
-static void process_apple_events();
-#endif
-
 
 // some platforms do not provide strnlen
 #ifndef HAVE_STRNLEN
@@ -258,7 +240,61 @@ pyi_unsetenv(const char *variable)
 
 #ifdef _WIN32
 
-/* TODO rename fuction and revisit */
+/* Resolve the runtime tmpdir path and build nested directories */
+wchar_t
+*pyi_build_temp_folder(char *runtime_tmpdir)
+{
+    wchar_t *wruntime_tmpdir;
+    wchar_t wruntime_tmpdir_expanded[PATH_MAX];
+    wchar_t *wruntime_tmpdir_abspath;
+    wchar_t *cursor;
+    wchar_t path_builder[PATH_MAX];
+    DWORD rc;
+    // Expand environment variables like %LOCALAPPDATA%
+    wruntime_tmpdir = pyi_win32_utils_from_utf8(NULL, runtime_tmpdir, 0);
+    if (!wruntime_tmpdir) {
+        FATALERROR("LOADER: Failed to convert runtime-tmpdir to a wide string.\n");
+        return NULL;
+    }
+    rc = ExpandEnvironmentStringsW(wruntime_tmpdir, wruntime_tmpdir_expanded,
+                                   PATH_MAX);
+    free(wruntime_tmpdir);
+    if (!rc) {
+        FATALERROR("LOADER: Failed to expand environment variables in the runtime-tmpdir.\n");
+        return NULL;
+    }
+    // Get the absolute path
+    if (pyi_win32_is_drive_root(wruntime_tmpdir_expanded)) {
+        /* Disk drive (e.g., "c:"); do not attempt to call _wfullpath(), because it will return
+           the current directory of this drive. So return a verbatim copy instead. */
+        wruntime_tmpdir_abspath = _wcsdup(wruntime_tmpdir_expanded);
+    } else {
+        wruntime_tmpdir_abspath = _wfullpath(NULL, wruntime_tmpdir_expanded, PATH_MAX);
+    }
+    if (!wruntime_tmpdir_abspath) {
+        FATALERROR("LOADER: Failed to obtain the absolute path of the runtime-tmpdir.\n");
+        return NULL;
+    }
+    VS("LOADER: absolute runtime tmpdir is %ls\n", wruntime_tmpdir_abspath);
+    // Create the directory path if it does not yet already exist (e.g.
+    // %AppData%\NewFolder\NestedFolder)
+    ZeroMemory(path_builder, PATH_MAX * sizeof(wchar_t));
+    cursor = wcschr(wruntime_tmpdir_abspath, L'\\');
+    while(cursor != NULL) {
+        wcsncpy(path_builder, wruntime_tmpdir_abspath,
+                cursor - wruntime_tmpdir_abspath + 1);
+        CreateDirectoryW(path_builder, NULL);
+        // We expect ERROR_ALREADY_EXISTS, ERROR_ACCESS_DENIED (if try to
+        // create a drive when running as an admin), etc...
+        cursor = wcschr(++cursor, L'\\');
+    }
+    // May not have a string terminated with \, so run CreateDirectoryW one
+    // last time to handle that case
+    CreateDirectoryW(wruntime_tmpdir_abspath, NULL);
+    return wruntime_tmpdir_abspath;
+}
+
+/* TODO rename function and revisit */
 int
 pyi_get_temp_path(char *buffer, char *runtime_tmpdir)
 {
@@ -267,7 +303,8 @@ pyi_get_temp_path(char *buffer, char *runtime_tmpdir)
     wchar_t prefix[16];
     wchar_t wchar_buffer[PATH_MAX];
     char *original_tmpdir;
-    char runtime_tmpdir_abspath[PATH_MAX + 1];
+    wchar_t *wruntime_tmpdir_abspath;
+    DWORD rc;
 
     if (runtime_tmpdir != NULL) {
       /*
@@ -278,8 +315,18 @@ pyi_get_temp_path(char *buffer, char *runtime_tmpdir)
       /*
        * Set TMP to runtime_tmpdir for _wtempnam() later
        */
-      pyi_path_fullpath(runtime_tmpdir_abspath, PATH_MAX, runtime_tmpdir);
-      pyi_setenv("TMP", runtime_tmpdir_abspath);
+      wruntime_tmpdir_abspath = pyi_build_temp_folder(runtime_tmpdir);
+      if (!wruntime_tmpdir_abspath) {
+          return 0;
+      }
+      // Store in the TMP environment variable
+      rc = _wputenv_s(L"TMP", wruntime_tmpdir_abspath);
+      free(wruntime_tmpdir_abspath);
+      if (rc) {
+          FATALERROR("LOADER: Failed to set the TMP environment variable.\n");
+          return 0;
+      }
+      VS("LOADER: Successfully resolved the specified runtime-tmpdir\n");
     }
 
     GetTempPathW(PATH_MAX, wchar_buffer);
@@ -292,7 +339,7 @@ pyi_get_temp_path(char *buffer, char *runtime_tmpdir)
      * to avoid stupid race conditions.
      */
     for (i = 0; i < 5; i++) {
-        /* TODO use race-free fuction - if any exists? */
+        /* TODO use race-free function - if any exists? */
         wchar_ret = _wtempnam(wchar_buffer, prefix);
 
         if (pyi_win32_mkdir(wchar_ret) == 0) {
@@ -430,10 +477,15 @@ remove_one(wchar_t *wfnm, size_t pos, struct _wfinddata_t wfinfo)
     wfnm[pos] = PYI_NULLCHAR;
     wcscat(wfnm, wfinfo.name);
 
-    if (wfinfo.attrib & _A_SUBDIR) {
-        /* Use recursion to remove subdirectories. */
-        pyi_win32_utils_to_utf8(fnm, wfnm, PATH_MAX);
-        pyi_remove_temp_path(fnm);
+    if ((wfinfo.attrib & _A_SUBDIR)) {
+        if (!pyi_win32_is_symlink(wfnm)) {
+            /* Use recursion to remove subdirectories. */
+            pyi_win32_utils_to_utf8(fnm, wfnm, PATH_MAX);
+            pyi_remove_temp_path(fnm);
+        } else {
+            /* Remove only directory link */
+            _wrmdir(wfnm);
+        }
     }
     else if (_wremove(wfnm)) {
         /* HACK: Possible concurrency issue... spin a little while */
@@ -486,7 +538,9 @@ remove_one(char *pnm, int pos, const char *fnm)
     pnm[pos] = PYI_NULLCHAR;
     strcat(pnm, fnm);
 
-    if (stat(pnm, &sbuf) == 0) {
+    /* Use lstat() instead of stat() to prevent recursion into
+     * symlinked directories */
+    if (lstat(pnm, &sbuf) == 0) {
         if (S_ISDIR(sbuf.st_mode) ) {
             /* Use recursion to remove subdirectories. */
             pyi_remove_temp_path(pnm);
@@ -514,6 +568,9 @@ pyi_remove_temp_path(const char *dir)
         dirnmlen++;
     }
     ds = opendir(dir);
+    if (!ds) {
+        return;
+    }
     finfo = readdir(ds);
 
     while (finfo) {
@@ -525,17 +582,21 @@ pyi_remove_temp_path(const char *dir)
 }
 #endif /* ifdef _WIN32 */
 
-/* TODO is this function still used? Could it be removed? */
-/*
- * If binaries were extracted, this should be called
- * to remove them
- */
-void
-cleanUp(ARCHIVE_STATUS *status)
+
+static int
+_check_strict_unpack_mode ()
 {
-    if (status->temppath[0]) {
-        pyi_remove_temp_path(status->temppath);
+    static int enabled = -1;
+    if (enabled == -1) {
+        char *env_strict = pyi_getenv("PYINSTALLER_STRICT_UNPACK_MODE"); /* strdup'd copy or NULL */
+        if (strcmp(env_strict, "0") == 0) {
+            enabled = 0;
+        } else {
+            enabled = 1;
+        }
+        free(env_strict);
     }
+    return enabled;
 }
 
 /*
@@ -558,11 +619,8 @@ pyi_open_target(const char *path, const char* name_)
     char *dir;
     size_t len;
 
-    strncpy(fnm, path, PATH_MAX);
-    strncpy(name, name_, PATH_MAX);
-
-    /* Check if the path names could be copied */
-    if (fnm[PATH_MAX-1] != '\0' || name[PATH_MAX-1] != '\0') {
+    if (snprintf(fnm, PATH_MAX, "%s", path) >= PATH_MAX ||
+        snprintf(name, PATH_MAX, "%s", name_) >= PATH_MAX) {
         return NULL;
     }
 
@@ -601,12 +659,22 @@ pyi_open_target(const char *path, const char* name_)
     pyi_win32_utils_from_utf8(wchar_buffer, fnm, PATH_MAX);
 
     if (_wstat(wchar_buffer, &sbuf) == 0) {
-        OTHERERROR("WARNING: file already exists but should not: %s\n", fnm);
+        if (_check_strict_unpack_mode()) {
+            OTHERERROR("ERROR: file already exists but should not: %s\n", fnm);
+            return NULL;
+        } else {
+            OTHERERROR("WARNING: file already exists but should not: %s\n", fnm);
+        }
     }
 #else
 
     if (stat(fnm, &sbuf) == 0) {
-        OTHERERROR("WARNING: file already exists but should not: %s\n", fnm);
+        if (_check_strict_unpack_mode()) {
+            OTHERERROR("ERROR: file already exists but should not: %s\n", fnm);
+            return NULL;
+        } else {
+            OTHERERROR("WARNING: file already exists but should not: %s\n", fnm);
+        }
     }
 #endif
     /*
@@ -623,6 +691,7 @@ pyi_copy_file(const char *src, const char *dst, const char *filename)
     FILE *in = pyi_path_fopen(src, "rb");
     FILE *out = pyi_open_target(dst, filename);
     char buf[4096];
+    size_t read_count = 0;
     int error = 0;
 
     if (in == NULL || out == NULL) {
@@ -636,7 +705,8 @@ pyi_copy_file(const char *src, const char *dst, const char *filename)
     }
 
     while (!feof(in)) {
-        if (fread(buf, 4096, 1, in) == -1) {
+        read_count = fread(buf, 1, 4096, in);
+        if (read_count <= 0 ) {
             if (ferror(in)) {
                 clearerr(in);
                 error = -1;
@@ -644,7 +714,7 @@ pyi_copy_file(const char *src, const char *dst, const char *filename)
             }
         }
         else {
-            size_t rc = fwrite(buf, 4096, 1, out);
+            size_t rc = fwrite(buf, 1, read_count, out);
             if (rc <= 0 || ferror(out)) {
                 clearerr(out);
                 error = -1;
@@ -661,7 +731,6 @@ pyi_copy_file(const char *src, const char *dst, const char *filename)
     return error;
 }
 
-/* TODO use dlclose() when exiting. */
 /* Load the shared dynamic library (DLL) */
 dylib_t
 pyi_utils_dlopen(const char *dllpath)
@@ -692,6 +761,26 @@ pyi_utils_dlopen(const char *dllpath)
 
 }
 
+/* TODO use pyi_utils_dlclose() when exiting. */
+/* Unlink/Close the shared library.
+ * Returns zero on success, a nonzero value on failure.
+ *
+ * Interesting fact: many debuggers link to attached libraries
+ * too, therefore calling dlclose from within the bootloader
+ * does **not** necessarily mean the library will be unloaded
+ * if a debugger is attached. */
+int
+pyi_utils_dlclose(dylib_t dll)
+{
+#ifdef _WIN32
+    /* FreeLibrary returns a nonzero value on success,
+     * invert it to provide a common return value */
+    return !FreeLibrary(dll);
+#else
+    return dlclose(dll);
+#endif
+}
+
 /* ////////////////////////////////////////////////////////////////// */
 /* TODO better merging of the following platform specific functions. */
 /* ////////////////////////////////////////////////////////////////// */
@@ -702,6 +791,68 @@ int
 pyi_utils_set_environment(const ARCHIVE_STATUS *status)
 {
     return 0;
+}
+
+static BOOL WINAPI
+_pyi_win32_console_ctrl(DWORD dwCtrlType)
+{
+    /* https://docs.microsoft.com/en-us/windows/console/handlerroutine */
+    static const char *name_map[] = {
+        "CTRL_C_EVENT", // 0
+        "CTRL_BREAK_EVENT", // 1
+        "CTRL_CLOSE_EVENT", // 2
+        NULL,
+        NULL,
+        "CTRL_LOGOFF_EVENT", // 5
+        "CTRL_SHUTDOWN_EVENT" // 6
+    };
+    const char *name = (dwCtrlType >= 0 && dwCtrlType <= 6) ? name_map[dwCtrlType] : NULL;
+
+    /* NOTE: in case of CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, or CTRL_SHUTDOWN_EVENT, the following
+     * message may not be printed to console anymore. As per MSDN, the internal console cleanup routine
+     * might have already been executed, preventing console functions from working reliably.
+     * See Remarks section at: https://docs.microsoft.com/en-us/windows/console/setconsolectrlhandler
+     */
+    VS("LOADER: received console control signal %d (%s)!\n", dwCtrlType, name ? name : "unknown");
+
+    /* Handle Ctrl+C and Ctrl+Break signals immediately. By returning TRUE, their default handlers
+     * (which would call ExitProcess()) are not called, so we are effectively suppressing the signal
+     * here, while letting the child process (who also received it) handle it as they see it fit.
+     */
+    if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_BREAK_EVENT) {
+        return TRUE;
+    }
+
+    /* Delay the inevitable for as long as we can. The same signal should also be received
+     * by the child process (as it is in the same process group as the parent), which will
+     * terminate (after optionally processing the signal, if python code installed its own handler).
+     * Therefore, we just wait here "forever" (compared to OS-imposed timeout for signal handling)
+     * to buy time for the child process to terminate and for the main thread of this (parent)
+     * process to perform the cleanup (sidenote: this handler is executed in a separate thread).
+     * So this thread is terminated either when the main thread of the process finishes and the
+     * program exits (gracefully), or when the time runs out and the OS kills everything (see
+     * https://docs.microsoft.com/en-us/windows/console/handlerroutine#timeouts).
+     */
+    Sleep(20000);
+    return TRUE;
+}
+
+static HANDLE
+_pyi_get_stream_handle(FILE *stream)
+{
+    HANDLE handle = (void *)_get_osfhandle(fileno(stream));
+    /* When stdin, stdout, and stderr are not associated with a stream (e.g., Windows application
+     * without console), _fileno() returns special value -2. Therefore, call to _get_osfhandle()
+     * returns INVALID_HANDLE_VALUE. If we caled _get_osfhandle() with 0, 1, or 2 instead of the
+     * result of _fileno(), _get_osfhandle() would also return -2 when the file descriptor is
+     * not associated with the stream. But because we take the _fileno() route, we need to handle
+     * only INVALID_HANDLE_VALUE (= -1).
+     * See: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/get-osfhandle
+     */
+    if (handle == INVALID_HANDLE_VALUE) {
+        return NULL;
+    }
+    return handle;
 }
 
 int
@@ -718,11 +869,10 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
     /* Convert file name to wchar_t from utf8. */
     pyi_win32_utils_from_utf8(buffer, thisfile, PATH_MAX);
 
-    /* the parent process should ignore all signals it can */
-    signal(SIGABRT, SIG_IGN);
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTERM, SIG_IGN);
-    signal(SIGBREAK, SIG_IGN);
+    /* Set up console ctrl handler; the call returns non-zero on success */
+    if (SetConsoleCtrlHandler(_pyi_win32_console_ctrl, TRUE) == 0) {
+        VS("LOADER: failed to install console ctrl handler!\n");
+    }
 
     VS("LOADER: Setting up to run child\n");
     sa.nLength = sizeof(sa);
@@ -734,9 +884,9 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
     si.lpTitle = NULL;
     si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_NORMAL;
-    si.hStdInput = (void*)_get_osfhandle(fileno(stdin));
-    si.hStdOutput = (void*)_get_osfhandle(fileno(stdout));
-    si.hStdError = (void*)_get_osfhandle(fileno(stderr));
+    si.hStdInput = _pyi_get_stream_handle(stdin);
+    si.hStdOutput = _pyi_get_stream_handle(stdout);
+    si.hStdError = _pyi_get_stream_handle(stderr);
 
     VS("LOADER: Creating child process\n");
 
@@ -812,10 +962,10 @@ pyi_utils_set_environment(const ARCHIVE_STATUS *status)
      * There were some issues with this approach. In some cases some
      * system libraries were trying to load incompatible libraries from
      * the dist directory. For instance this was experienced with macprots
-     * and PyQt4 applications.
+     * and PyQt applications.
      *
      * To tell the OS where to look for dynamic libraries we modify
-     * .so/.dylib files to use relative paths to other dependend
+     * .so/.dylib files to use relative paths to other dependent
      * libraries starting with @executable_path.
      *
      * For more information see:
@@ -848,7 +998,7 @@ pyi_utils_set_environment(const ARCHIVE_STATUS *status)
 }
 
 /*
- * If the program is actived by a systemd socket, systemd will set
+ * If the program is activated by a systemd socket, systemd will set
  * LISTEN_PID, LISTEN_FDS environment variable for that process.
  *
  * LISTEN_PID is set to the pid of the parent process of bootloader,
@@ -858,7 +1008,7 @@ pyi_utils_set_environment(const ARCHIVE_STATUS *status)
  * LISTEN_PID environment variable remains unchanged.
  *
  * Here we change the LISTEN_PID to the child pid in child process.
- * So the application can detecte it and use the LISTEN_FDS created
+ * So the application can detect it and use the LISTEN_FDS created
  * by systemd.
  */
 int
@@ -886,16 +1036,39 @@ set_systemd_env()
  */
 pid_t child_pid = 0;
 
+/* Remember whether child has received a signal and what signal it was.
+ * In onefile mode, this allows us to re-raise the signal in the parent
+ * once the temporary directory has been cleaned up.
+ */
+int child_signalled = 0;
+int child_signal = 0;
+
+/*
+ * Retrieve child process' PID, if available.
+ */
+pid_t
+pyi_utils_get_child_pid()
+{
+    return child_pid;
+}
+
 static void
 _ignoring_signal_handler(int signum)
 {
-    VS("LOADER: Ignoring signal %d\n", signum);
+    /* Ignore the signal. Avoid generating debug messages as per
+     * explanation in _signal_handler().
+     */
+    (void)signum;  /* Supress unused argument warnings */
 }
 
 static void
 _signal_handler(int signum)
 {
-    VS("LOADER: Forwarding signal %d to child pid %d\n", signum, child_pid);
+    /* Forward signal to the child. Avoid generating debug messages, as
+     * functions involved are generally not signal safe. Furthermore, it
+     * may result in endless spamming of SIGPIPE, as reported and
+     * diagnosed in #5270.
+     */
     kill(child_pid, signum);
 }
 
@@ -922,26 +1095,21 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
     int ignore_signals;
     int signum;
 
-    argv_pyi = (char**)calloc(argc + 1, sizeof(char*));
-    argc_pyi = 0;
-
-    for (i = 0; i < argc; i++) {
-    #if defined(__APPLE__) && defined(WINDOWED)
-
-        /* if we are on a Mac, it passes a strange -psnxxx argument.  Filter it out. */
-        if (strstr(argv[i], "-psn") == argv[i]) {
-            /* skip */
-        }
-        else
-    #endif
-        {
-            argv_pyi[argc_pyi++] = strdup(argv[i]);
-        }
+    /* Initialize argv_pyi and argc_pyi */
+    if (pyi_utils_initialize_args(argc, argv) < 0) {
+        goto cleanup;
     }
 
-    #if defined(__APPLE__) && defined(WINDOWED)
-    process_apple_events();
-    #endif
+    /* macOS: Apple Events handling */
+#if defined(__APPLE__) && defined(WINDOWED)
+    /* Install Apple Event handlers */
+    pyi_apple_install_event_handlers();
+    /* argv emulation; do a short (250 ms) cycle of Apple Events processing
+     * before bringing up the child process */
+    if (pyi_arch_get_option(status, "pyi-macos-argv-emulation") != NULL) {
+        pyi_apple_process_events(0.25);  /* short timeout (250 ms) */
+    }
+#endif
 
     pid = fork();
     if (pid < 0) {
@@ -980,12 +1148,43 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
     for (signum = 0; signum < num_signals; ++signum) {
         // don't mess with SIGCHLD/SIGCLD; it affects our ability
         // to wait() for the child to exit
-        if (signum != SIGCHLD && signum != SIGCLD) {
+        // don't change SIGTSP handling to allow Ctrl-Z
+        if (signum != SIGCHLD && signum != SIGCLD && signum != SIGTSTP) {
             signal(signum, handler);
         }
     }
 
+#if defined(__APPLE__) && defined(WINDOWED)
+    /* macOS: forward events to child */
+    do {
+        /* The below loop will iterate about once every second on Apple,
+         * waiting on the event queue most of that time. */
+        wait_rc = waitpid(child_pid, &rc, WNOHANG);
+        if (wait_rc == 0) {
+            /* Check if we have a pending event that we need to forward... */
+            if (pyi_apple_has_pending_event()) {
+                /* Attempt to re-send the pending event after 0.5 second delay. */
+                if (pyi_apple_send_pending_event(0.5) != 0) {
+                    /* Do not process additional events until the pending one
+                     * is successfully forwarded (or cleaned up by error). */
+                    continue;
+                }
+            }
+            /* Wait for and process AppleEvents with a 1-second timeout, forwarding
+             * events to the child. */
+            pyi_apple_process_events(1.0);  /* long timeout (1 sec) */
+        }
+    } while (!wait_rc);
+    /* Check if we have a pending event to forward (for diagnostics) */
+    if (pyi_apple_has_pending_event()) {
+        VS("LOADER [AppleEvent]: Child terminated before pending event could be forwarded!\n");
+        pyi_apple_cleanup_pending_event();
+    }
+    /* Uninstall event handlers */
+    pyi_apple_uninstall_event_handlers();
+#else
     wait_rc = waitpid(child_pid, &rc, 0);
+#endif
     if (wait_rc < 0) {
         VS("LOADER: failed to wait for child process: %s\n", strerror(errno));
     }
@@ -996,12 +1195,9 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
         signal(signum, SIG_DFL);
     }
 
-  cleanup:
+cleanup:
     VS("LOADER: freeing args\n");
-    for (i = 0; i < argc_pyi; i++) {
-        free(argv_pyi[i]);
-    }
-    free(argv_pyi);
+    pyi_utils_free_args();
 
     /* Either wait() failed, or we jumped to `cleanup` and
      * didn't wait() at all. Either way, exit with error,
@@ -1017,168 +1213,261 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
     }
 
     /* Process ended abnormally */
-    if (WIFSIGNALED(rc)) {
-        VS("LOADER: re-raising child signal %d\n", WTERMSIG(rc));
-        /* Mimick the signal the child received */
-        raise(WTERMSIG(rc));
+    child_signalled = WIFSIGNALED(rc);
+    if (child_signalled) {
+        child_signal = WTERMSIG(rc);
+        VS("LOADER: child received signal %d; storing for re-raise after cleanup...\n", child_signal);
     }
     return 1;
 }
 
-/*
- * On Mac OS X this converts files from kAEOpenDocuments events into sys.argv.
+/* If the child process received a signal during execution, re-raise it.
+ * Otherwise, this function is a no-op.
  */
-#if defined(__APPLE__) && defined(WINDOWED)
-
-static int gQuit = false;
-
-static pascal OSErr handle_open_doc_ae(const AppleEvent *theAppleEvent, AppleEvent *reply, SRefCon handlerRefcon)
+void pyi_utils_reraise_child_signal()
 {
-   AEDescList docList;
-   long index;
-   long count = 0;
-   int i;
-   char *myFileName;
-   Size actualSize;
-   DescType returnedType;
-   AEKeyword keywd;
-   FSRef theRef;
-
-   VS("LOADER [ARGV_EMU]: OpenDocument handler called.\n");
-
-   OSErr err = AEGetParamDesc(theAppleEvent, keyDirectObject, typeAEList, &docList);
-   if (err != noErr) return err;
-
-   err = AECountItems(&docList, &count);
-   if (err != noErr) return err;
-
-   for (index = 1; index <= count; index++)
-   {
-     err = AEGetNthPtr(&docList, index, typeFSRef, &keywd, &returnedType, &theRef, sizeof(theRef), &actualSize);
-
-     CFURLRef fullURLRef;
-     fullURLRef = CFURLCreateFromFSRef(NULL, &theRef);
-     CFStringRef cfString = CFURLCopyFileSystemPath(fullURLRef, kCFURLPOSIXPathStyle);
-     CFRelease(fullURLRef);
-     CFMutableStringRef cfMutableString = CFStringCreateMutableCopy(NULL, 0, cfString);
-     CFRelease(cfString);
-     CFStringNormalize(cfMutableString, kCFStringNormalizationFormC);
-     int len = CFStringGetLength(cfMutableString);
-     const int bufferSize = (len+1)*6;  // in theory up to six bytes per Unicode code point, for UTF-8.
-     char* buffer = (char*)malloc(bufferSize);
-     CFStringGetCString(cfMutableString, buffer, bufferSize, kCFStringEncodingUTF8);
-
-     argv_pyi = (char**)realloc(argv_pyi,(argc_pyi+2)*sizeof(char*));
-     argv_pyi[argc_pyi++] = strdup(buffer);
-     argv_pyi[argc_pyi] = NULL;
-
-     VS("LOADER [ARGV_EMU]: argv entry appended.");
-
-     free(buffer);
-   }
-
-  err = AEDisposeDesc(&docList);
-
-
-  return (err);
+    if (child_signalled) {
+        /* Mimic the signal the child received */
+        VS("LOADER: re-raising child signal %d\n", child_signal);
+        raise(child_signal);
+    }
 }
 
 
-/*
- * On Mac OS X this converts ULR from kAEGetURL events into sys.argv.
+#if !defined(__APPLE__)
+
+/* Replace the current process with another instance of itself, i.e.,
+ * restart the process in-place (exec() without fork()). Used on linux
+ * and unix-like OSes to achieve single-process onedir execution mode.
  */
-static pascal OSErr handle_get_url_ae(const AppleEvent *theAppleEvent, AppleEvent *reply, SRefCon handlerRefcon)
+int pyi_utils_replace_process(const char *thisfile, const int argc, char *const argv[])
 {
-    DescType typeCode;
-    char urlBuffer[2048];
-    Size actualSize;
-    VS("LOADER [ARGV_EMU]: OpenURL handler called.\n");
+    int rc;
 
-    OSErr err = AEGetParamPtr(theAppleEvent, keyDirectObject, typeChar, &typeCode, &urlBuffer, sizeof(urlBuffer), &actualSize);
-    if (err != noErr) return err;
+    /* Use helper to copy argv into NULL-terminated arguments array, argv_pyi. */
+    if (pyi_utils_initialize_args(argc, argv) < 0) {
+        return -1;
+    }
+    /* Replace the current executable image. */
+    rc = execvp(thisfile, argv_pyi);
+    /* This part is reached only if exec() failed. */
+    if (rc < 0) {
+        VS("Failed to exec: %s\n", strerror(errno));
+    }
+    return rc;
+}
 
-    argv_pyi = (char**)realloc(argv_pyi,(argc_pyi+2)*sizeof(char*));
-    argv_pyi[argc_pyi++] = strndup(urlBuffer, actualSize);
+#endif /* !defined(__APPLE) */
+
+#endif /* _WIN32 */
+
+
+/*
+ * Initialize private argc_pyi and argv_pyi from the given argc and
+ * argv by creating a deep copy. The resulting argc_pyi and argv_pyi
+ * can be retrieved by pyi_utils_get_args() and are freed/cleaned-up by
+ * pyi_utils_free_args().
+ *
+ * The argv_pyi contains argc_pyi + 1 elements, with the last element
+ * being NULL (i.e., it is execv-compatible NULL-terminated array).
+ *
+ * On macOS, this function filters out the -psnxxx argument that is
+ * passed to executable when .app bundle is launched from Finder:
+ * https://stackoverflow.com/questions/10242115/os-x-strange-psn-command-line-parameter-when-launched-from-finder
+ */
+int pyi_utils_initialize_args(const int argc, char *const argv[])
+{
+    int i;
+
+    argv_pyi = (char**)calloc(argc + 1, sizeof(char*));
+    argc_pyi = 0;
+    if (!argv_pyi) {
+        FATALERROR("LOADER: failed to allocate argv_pyi: %s\n", strerror(errno));
+        return -1;
+    }
+
+    for (i = 0; i < argc; i++) {
+        char *tmp;
+
+        /* Filter out -psnxxx argument that is used on macOS to pass
+         * unique process serial number (PSN) to apps launched via Finder. */
+        #if defined(__APPLE__) && defined(WINDOWED)
+        if (strstr(argv[i], "-psn") == argv[i]) {
+            continue;
+        }
+        #endif
+
+        /* Copy the argument */
+        tmp = strdup(argv[i]);
+        if (!tmp) {
+            FATALERROR("LOADER: failed to strdup argv[%d]: %s\n", i, strerror(errno));
+            /* If we can't allocate basic amounts of memory at this critical point,
+             * we should probably just give up. */
+            return -1;
+        }
+        argv_pyi[argc_pyi++] = tmp;
+    }
+
+    return 0;
+}
+
+/*
+ * Append given argument to private argv_pyi and increment argc_pyi.
+ * The argv_pyi array is reallocated accordingly.
+ *
+ * Returns 0 on success, -1 on failure (due to failed array reallocation).
+ * On failure, argv_pyi and argc_pyi remain unchanged.
+ */
+int pyi_utils_append_to_args(const char *arg)
+{
+    char **new_argv_pyi;
+    char *new_arg;
+
+    /* Make a copy of new argument */
+    new_arg = strdup(arg);
+    if (!new_arg) {
+        return -1;
+    }
+
+    /* Reallocate argv_pyi array, making space for new argument plus
+     * terminating NULL */
+    new_argv_pyi = (char**)realloc(argv_pyi, (argc_pyi + 2) * sizeof(char *));
+    if (!new_argv_pyi) {
+        free(new_arg);
+        return -1;
+    }
+    argv_pyi = new_argv_pyi;
+
+    /* Store new argument */
+    argv_pyi[argc_pyi++] = new_arg;
     argv_pyi[argc_pyi] = NULL;
 
-    VS("LOADER [ARGV_EMU]: argv entry appended.\n");
+    return 0;
+}
 
-    return (err);
+/*
+ * Retrieve value of argc_pyi and the pointer to argv_pyi. The retrieved
+ * arguments are originally the same as the ones passed to
+ * pyi_utils_initialize_args(), but may have been modified by subsequent
+ * processing code (e.g., Apple event processing).
+ *
+ * The argv_pyi array is NULL terminated (i.e., contains argc_pyi + 1)
+ * entries, and the last entry is NULL).
+ *
+ * The ownership of array is not transferred, i.e., it should not be
+ * explicitly freed by the caller. Instead, the array and its resources
+ * are cleaned up oncepyi_utils_free_args() is called.
+ */
+void pyi_utils_get_args(int *argc, char ***argv)
+{
+    if (argc) {
+        *argc = argc_pyi;
+    }
+    if (argv) {
+        *argv = argv_pyi;
+    }
+}
+
+/*
+ * Free/clean-up the private arguments (pyi_argv).
+ */
+void pyi_utils_free_args()
+{
+    /* Free each entry */
+    int i;
+    for (i = 0; i < argc_pyi; i++) {
+        free(argv_pyi[i]);
+    }
+    /* Free the list */
+    free(argv_pyi);
+    /* Clean-up the variables, just in case */
+    argc_pyi = 0;
+    argv_pyi = NULL;
 }
 
 
-static void process_apple_events()
+/*
+ * The base for MAGIC pattern(s) used within the bootloader. The actual
+ * pattern should be programmatically constructed by copying this
+ * array to a buffer and adjusting the fourth byte. This way, we avoid
+ * storing the actual pattern in the executable, which would produce
+ * false-positive matches when the executable is scanned.
+ */
+const unsigned char MAGIC_BASE[8] = {
+    'M', 'E', 'I', 000,
+    013, 012, 013, 016
+};
+
+/*
+ * Perform full back-to-front scan of the given file and search for the
+ * specified MAGIC pattern.
+ *
+ * Returns offset within the file if MAGIC pattern is found, 0 otherwise.
+ */
+uint64_t
+pyi_utils_find_magic_pattern(FILE *fp, const unsigned char *magic, size_t magic_len)
 {
-    OSStatus handler_doc_install_status;
-    OSStatus handler_url_install_status;
-    OSStatus handler_remove_status;
-    OSStatus rcv_status;
-    OSStatus pcs_status;
-    EventTypeSpec event_types[1];  /*  List of event types to handle. */
-    AEEventHandlerUPP handler_open_doc;
-    AEEventHandlerUPP handler_get_url;
-    EventHandlerRef handler_ref; /* Reference for later removing the event handler. */
-    EventRef event_ref;          /* Event that caused ReceiveNextEvent to return. */
-    OSType ev_class;
-    UInt32 ev_kind;
-    EventTimeout timeout = 1.0;  /* number of seconds */
+    static const int SEARCH_CHUNK_SIZE = 8192;
+    unsigned char *buffer = NULL;
+    uint64_t start_pos, end_pos;
+    uint64_t offset = 0;  /* return value */
 
-    VS("LOADER [ARGV_EMU]: AppleEvent - processing...\n");
+    /* Allocate the read buffer */
+    buffer = malloc(SEARCH_CHUNK_SIZE);
+    if (!buffer) {
+        VS("LOADER: failed to allocate read buffer (%d bytes)!\n", SEARCH_CHUNK_SIZE);
+        goto cleanup;
+    }
 
-    event_types[0].eventClass = kEventClassAppleEvent;
-    event_types[0].eventKind = kEventAppleEvent;
+    /* Determine file size */
+    if (pyi_fseek(fp, 0, SEEK_END) < 0) {
+        VS("LOADER: failed to seek to the end of the file!\n");
+        goto cleanup;
+    }
+    end_pos = pyi_ftell(fp);
 
-    /* Carbon Event Manager requires us to convert the function pointer to type EventHandlerUPP. */
-    /* https://developer.apple.com/legacy/library/documentation/Carbon/Conceptual/Carbon_Event_Manager/Tasks/CarbonEventsTasks.html */
-    handler_open_doc = NewAEEventHandlerUPP(handle_open_doc_ae);
-    handler_get_url = NewAEEventHandlerUPP(handle_get_url_ae);
+    /* Sanity check */
+    if (end_pos < magic_len) {
+        VS("LOADER: file is too short to contain magic pattern!\n");
+        goto cleanup;
+    }
 
-    handler_doc_install_status = AEInstallEventHandler(kCoreEventClass, kAEOpenDocuments, handler_open_doc, 0, false);
-    handler_url_install_status = AEInstallEventHandler(kInternetEventClass, kAEGetURL, handler_get_url, 0, false);
+    /* Search the file back to front, in overlapping SEARCH_CHUNK_SIZE
+     * chunks. */
+    do {
+        size_t chunk_size, i;
+        start_pos = (end_pos >= SEARCH_CHUNK_SIZE) ? (end_pos - SEARCH_CHUNK_SIZE) : 0;
+        chunk_size = (size_t)(end_pos - start_pos);
 
-
-    if (handler_doc_install_status == noErr && handler_url_install_status == noErr) {
-
-        VS("LOADER [ARGV_EMU]: AppleEvent - installed handler.\n");
-
-        while(!gQuit) {
-           VS("LOADER [ARGV_EMU]: AppleEvent - calling ReceiveNextEvent\n");
-           rcv_status = ReceiveNextEvent(1, event_types, timeout, true, &event_ref);
-
-           if (rcv_status == eventLoopTimedOutErr) {
-              VS("LOADER [ARGV_EMU]: ReceiveNextEvent timed out\n");
-              break;
-           }
-           else if (rcv_status != 0) {
-              VS("LOADER [ARGV_EMU]: ReceiveNextEvent fetching events failed");
-              break;
-           }
-           else
-           {
-              VS("LOADER [ARGV_EMU]: ReceiveNextEvent got an event");
-
-              pcs_status = AEProcessEvent(event_ref);
-              if (pcs_status != 0) {
-                 VS("LOADER [ARGV_EMU]: processing events failed");
-                 break;
-              }
-           }
+        /* Is the remaining chunk large enough to hold the pattern? */
+        if (chunk_size < magic_len) {
+            break;
         }
 
-        VS("LOADER [ARGV_EMU]: Out of the event loop.");
+        /* Read the chunk */
+        if (pyi_fseek(fp, start_pos, SEEK_SET) < 0) {
+            VS("LOADER: failed to seek to the offset 0x%" PRIX64 "!\n", start_pos);
+            goto cleanup;
+        }
+        if (fread(buffer, 1, chunk_size, fp) != chunk_size) {
+            VS("LOADER: failed to read chunk (%zd bytes)!\n", chunk_size);
+            goto cleanup;
+        }
 
-        handler_remove_status = RemoveEventHandler(handler_ref);
+        /* Scan the chunk */
+        for (i = chunk_size - magic_len + 1; i > 0; i--) {
+            if (memcmp(buffer + i -1, magic, magic_len) == 0) {
+                offset = start_pos + i - 1;
+                goto cleanup;
+            }
+        }
 
-    }
-    else {
-        VS("LOADER [ARGV_EMU]: AppleEvent - ERROR installing handler.\n");
-    }
+        /* Adjust search location for next chunk; ensure proper overlap */
+        end_pos = start_pos + magic_len - 1;
+    } while (start_pos > 0);
 
-    /* Remove handler_ref reference when we are done with EventHandlerUPP. */
-    /* Carbon Event Manager does not do this automatically. */
-    DisposeEventHandlerUPP(handler_open_doc)
-    DisposeEventHandlerUPP(handler_get_url)
+cleanup:
+    free(buffer);
+
+    return offset;
 }
-#endif /* if defined(__APPLE__) && defined(WINDOWED) */
-
-#endif  /* WIN32 */

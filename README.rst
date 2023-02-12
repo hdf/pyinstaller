@@ -1,25 +1,26 @@
 PyInstaller Overview
 ====================
 
+.. image:: https://img.shields.io/pypi/v/pyinstaller
+   :alt: PyPI
+   :target: https://pypi.org/project/pyinstaller
+.. image:: https://img.shields.io/pypi/pyversions/pyinstaller
+   :alt: PyPI - Python Version
+   :target: https://pypi.org/project/pyinstaller
+.. image:: https://img.shields.io/readthedocs/pyinstaller/stable
+   :alt: Read the Docs (version)
+   :target: https://pyinstaller.org
+.. image:: https://img.shields.io/pypi/dm/pyinstaller
+   :alt: PyPI - Downloads
+   :target: https://pypistats.org/packages/pyinstaller
+
+
 PyInstaller bundles a Python application and all its dependencies into a single
 package. The user can run the packaged app without installing a Python
 interpreter or any modules.
 
-
-**Help keeping PyInstaller alive:**
-Maintaining PyInstaller is a huge amount of work.
-PyInstaller development can only continue
-if users and companies provide sustainable funding. See
-http://www.pyinstaller.org/funding.html for how to support PyInstaller.
-
-
-:Documentation: https://pyinstaller.readthedocs.io/
-:Website:       http://www.pyinstaller.org/
+:Documentation: https://pyinstaller.org/
 :Code:          https://github.com/pyinstaller/pyinstaller
-:Donate:        | https://www.bountysource.com/teams/pyinstaller
-                | Bitcoin: 1JUFjawzWDR7Tc8z9TKXstVFdjkDY9FbtK
-                | `more ways to donate … <http://www.pyinstaller.org/donate.html>`_
-
 
 PyInstaller reads a Python script written by you. It analyzes your code
 to discover every other module and library your script needs in order to
@@ -28,7 +29,7 @@ Python interpreter! -- and puts them with your script in a single folder, or
 optionally in a single executable file.
 
 
-PyInstaller is tested against Windows, Mac OS X, and GNU/Linux.
+PyInstaller is tested against Windows, macOS, and GNU/Linux.
 However, it is not a cross-compiler:
 to make a Windows app you run PyInstaller in Windows; to make
 a GNU/Linux app you run it in GNU/Linux, etc.
@@ -40,64 +41,69 @@ but is not tested against them as part of the continuous integration tests.
 Main Advantages
 ---------------
 
-- Works out-of-the-box with any Python version 3.5-3.7.
+- Works out-of-the-box with any Python version 3.7-3.11.
 - Fully multi-platform, and uses the OS support to load the dynamic libraries,
   thus ensuring full compatibility.
-- Correctly bundles the major Python packages such as numpy, PyQt4, PyQt5,
-  PySide, Django, wxPython, matplotlib and others out-of-the-box.
+- Correctly bundles the major Python packages such as numpy, PyQt5,
+  PySide2, PyQt6, PySide6, wxPython, matplotlib and others out-of-the-box.
 - Compatible with many 3rd-party packages out-of-the-box. (All the required
   tricks to make external packages work are already integrated.)
-- Libraries like PyQt5, PyQt4, PySide, wxPython, matplotlib or Django are fully
-  supported, without having to handle plugins or external data files manually.
-- Working code signing on OS X.
+- Works with code signing on macOS.
 - Bundles MS Visual C++ DLLs on Windows.
 
 
 Installation
 ------------
 
-PyInstaller is available on PyPI. You can install it through `pip`::
+PyInstaller is available on PyPI. You can install it through `pip`:
+
+.. code:: bash
 
       pip install pyinstaller
 
 
 Requirements and Tested Platforms
-------------------------------------
+---------------------------------
 
-- Python: 
-
- - 3.5-3.7
- - PyCrypto_ 2.4+ (only if using bytecode encryption)
-
+- Python:
+    - 3.7-3.11. Note that Python 3.10.0 contains a bug making it unsupportable by
+      PyInstaller. PyInstaller will also not work with beta releases of Python
+      3.12.
 - Windows (32bit/64bit):
-
- - Windows XP or newer.
-
- - We don't support Python installed from the Windows store when not using virtual environments due to 
-   `permission errors <https://github.com/pyinstaller/pyinstaller/pull/4702>`_ 
-   that can't easily be fixed.
-    
-- GNU/Linux (32bit/64bit)
-
- - ldd: Console application to print the shared libraries required
-   by each program or shared library. This typically can be found in
-   the distribution-package `glibc` or `libc-bin`.
- - objdump: Console application to display information from 
-   object files. This typically can be found in the
-   distribution-package `binutils`.
- - objcopy: Console application to copy and translate object files.
-   This typically can be found in the distribution-package `binutils`,
-   too.
-
-- Mac OS X (64bit):
-
- - Mac OS X 10.7 (Lion) or newer.
+    - PyInstaller should work on Windows 7 or newer, but we only officially support Windows 8+.
+    - Support for Python installed from the Windows store without using virtual
+      environments requires PyInstaller 4.4 or later.
+    - Note that Windows on ``arm64`` is not yet supported. If you have such a
+      device and want to help us add ``arm64`` support then please let us know on
+      our issue tracker.
+- Linux:
+    - GNU libc based distributions on architectures ``x86_64``, ``aarch64``,
+      ``i686``, ``ppc64le``, ``s390x``.
+    - musl libc based distributions on architectures ``x86_64``, ``aarch64``.
+    - ldd: Console application to print the shared libraries required
+      by each program or shared library. This typically can be found in
+      the distribution-package `glibc` or `libc-bin`.
+    - objdump: Console application to display information from
+      object files. This typically can be found in the
+      distribution-package `binutils`.
+    - objcopy: Console application to copy and translate object files.
+      This typically can be found in the distribution-package `binutils`,
+      too.
+    - Raspberry Pi users on ``armv5``-``armv7`` should `add piwheels as an extra
+      index url <https://www.piwheels.org/>`_ then ``pip install pyinstaller``
+      as usual.
+- macOS (``x86_64`` or ``arm64``):
+    - macOS 10.15 (Catalina) or newer.
+    - Supports building ``universal2`` applications provided that your installation
+      of Python and all your dependencies are also compiled ``universal2``.
 
 
 Usage
 -----
 
-Basic usage is very simple, just run it against your main script::
+Basic usage is very simple, just run it against your main script:
+
+.. code:: bash
 
       pyinstaller /path/to/yourscript.py
 
@@ -105,60 +111,43 @@ For more details, see the `manual`_.
 
 
 Untested Platforms
----------------------
+------------------
 
 The following platforms have been contributed and any feedback or
 enhancements on these are welcome.
 
 - FreeBSD
-
- - ldd
-
+    - ldd
 - Solaris
-
- - ldd
- - objdump
-
+    - ldd
+    - objdump
 - AIX
-
- - AIX 6.1 or newer. PyInstaller will not work with statically
-   linked Python libraries.
- - ldd
-
-- PowerPC GNU/Linux (Debian)
-
+    - AIX 6.1 or newer. PyInstaller will not work with statically
+      linked Python libraries.
+    - ldd
+- Linux on any other libc implementation/architecture combination not listed
+  above.
 
 Before using any contributed platform, you need to build the PyInstaller
-bootloader, as we do not ship binary packages. Download PyInstaller
-source, and build the bootloader::
-     
-        cd bootloader
-        python ./waf distclean all
-
-Then install PyInstaller::
-
-        python setup.py install
-        
-or simply use it directly from the source (pyinstaller.py).
+bootloader. This will happen automatically when you ``pip install
+pyinstaller`` provided that you have an appropriate C compiler (typically
+either ``gcc`` or ``clang``) and zlib's development headers already installed.
 
 
 Support
----------------------
+-------
 
-See http://www.pyinstaller.org/support.html for how to find help as well as
-for commercial support.
-
-
-Funding
----------------------
-
-Maintaining PyInstaller is a huge amount of work.
-PyInstaller development can only continue
-if users and companies provide sustainable funding. See
-http://www.pyinstaller.org/funding.html for how to support PyInstaller.
+- Official debugging guide: https://pyinstaller.org/en/v5.8.0/when-things-go-wrong.html
+- Assorted user contributed help topics: https://github.com/pyinstaller/pyinstaller/wiki
+- Web based Q&A forums: https://github.com/pyinstaller/pyinstaller/discussions
+- Email based Q&A forums: https://groups.google.com/g/pyinstaller
 
 
+Changes in this Release
+-----------------------
 
-.. _PyCrypto: https://www.dlitz.net/software/pycrypto/
-.. _`manual`: https://pyinstaller.readthedocs.io/en/latest/
+You can find a detailed list of changes in this release
+in the `Changelog`_ section of the manual.
 
+.. _`manual`: https://pyinstaller.org/en/v5.8.0/
+.. _`Changelog`: https://pyinstaller.org/en/v5.8.0/CHANGES.html

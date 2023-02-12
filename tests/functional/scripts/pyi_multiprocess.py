@@ -1,5 +1,5 @@
 #-----------------------------------------------------------------------------
-# Copyright (c) 2005-2020, PyInstaller Development Team.
+# Copyright (c) 2005-2023, PyInstaller Development Team.
 #
 # Distributed under the terms of the GNU General Public License (version 2
 # or later) with exception for distributing the bootloader.
@@ -10,7 +10,6 @@
 #-----------------------------------------------------------------------------
 
 import multiprocessing
-import sys
 
 
 class SendeventProcess(multiprocessing.Process):

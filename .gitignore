@@ -6,9 +6,13 @@
 __pycache__/
 /*.egg
 /*.egg-info/
+*.egg-info/
 /*.egg-link
 /.eggs/
 /.pytest_cache/
+/pip-wheel-metadata/
+/.coverage
+/.tox
 
 # /
 /AES.pyd
@@ -85,6 +89,15 @@ tests/old_suite/basic/test_pyz_as_external_file.exe.pkg
 /bootloader/.waf-*/
 /bootloader/.waf3-*/
 
+# Exclude all but the standard bootloaders
+PyInstaller/bootloader/*
+!PyInstaller/bootloader/Darwin-64bit
+!PyInstaller/bootloader/Linux-32bit-intel/
+!PyInstaller/bootloader/Linux-64bit-intel/
+!PyInstaller/bootloader/Windows-32bit-intel/
+!PyInstaller/bootloader/Windows-64bit-intel/
+!PyInstaller/bootloader/images/
+
 # Mac OS X
 .DS_store
 
@@ -94,3 +107,20 @@ tests/old_suite/basic/test_pyz_as_external_file.exe.pkg
 # py.test cache folder
 .cache
 *.prof
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# VSCode projects
+*.code-workspace
+*.vscode
+
+# Coverage
+.coverage
+htmlcov

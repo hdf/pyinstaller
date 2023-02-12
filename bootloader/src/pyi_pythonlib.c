@@ -1,6 +1,6 @@
 /*
  * ****************************************************************************
- * Copyright (c) 2013-2020, PyInstaller Development Team.
+ * Copyright (c) 2013-2023, PyInstaller Development Team.
  *
  * Distributed under the terms of the GNU General Public License (version 2
  * or later) with exception for distributing the bootloader.
@@ -14,24 +14,15 @@
 /*
  * Functions to load, initialize and launch Python.
  */
-
-/* TODO: use safe string functions */
-#define _CRT_SECURE_NO_WARNINGS 1
+/* size of buffer to store the name of the Python DLL library */
+#define DLLNAME_LEN (64)
 
 #ifdef _WIN32
     #include <windows.h> /* HMODULE */
     #include <fcntl.h>   /* O_BINARY */
     #include <io.h>      /* _setmode */
-    #include <winsock.h> /* ntohl */
 #else
     #include <dlfcn.h>  /* dlerror */
-    #include <limits.h> /* PATH_MAX */
-    #ifdef __FreeBSD__
-/* freebsd issue #188316 */
-        #include <arpa/inet.h>  /* ntohl */
-    #else
-        #include <netinet/in.h>  /* ntohl */
-    #endif
     #include <stdlib.h>  /* mbstowcs */
 #endif /* ifdef _WIN32 */
 #include <stddef.h>  /* ptrdiff_t */
@@ -40,6 +31,7 @@
 #include <locale.h>  /* setlocale */
 
 /* PyInstaller headers. */
+#include "pyi_pythonlib.h"
 #include "pyi_global.h"
 #include "pyi_path.h"
 #include "pyi_archive.h"
@@ -55,45 +47,47 @@ pyi_pylib_load(ARCHIVE_STATUS *status)
 {
     dylib_t dll;
     char dllpath[PATH_MAX];
-    char dllname[64];
-    char *p;
-    int len;
+    char dllname[DLLNAME_LEN];
+    size_t len;
 
 /*
- * On AIX Append the shared object member to the library path
- * to make it look like this:
- *   libpython2.6.a(libpython2.6.so)
+ * On AIX Append the name of shared object library path might be an archive.
+ * In that case, modify the name to make it look like:
+ *   libpython3.6.a(libpython3.6.so)
+ * Shared object names ending with .so may be used asis.
  */
 #ifdef AIX
     /*
-     * Determine if shared lib is in libpython?.?.so or libpython?.?.a(libpython?.?.so) format
+     * Determine if shared lib is in libpython?.?.so or
+     * libpython?.?.a(libpython?.?.so) format
      */
+    char *p;
     if ((p = strrchr(status->cookie.pylibname, '.')) != NULL && strcmp(p, ".a") == 0) {
       /*
        * On AIX 'ar' archives are used for both static and shared object.
        * To load a shared object from a library, it should be loaded like this:
-       *   dlopen("libpython2.6.a(libpython2.6.so)", RTLD_MEMBER)
+       *   dlopen("libpythonX.Y.a(libpythonX.Y.so)", RTLD_MEMBER)
        */
       uint32_t pyvers_major;
       uint32_t pyvers_minor;
 
-      pyvers_major = pyvers / 10;
-      pyvers_minor = pyvers % 10;
+      pyvers_major = pyvers / 100;
+      pyvers_minor = pyvers % 100;
 
-      len = snprintf(dllname, 64,
-              "libpython%01d.%01d.a(libpython%01d.%01d.so)",
+      len = snprintf(dllname, DLLNAME_LEN,
+              "libpython%d.%d.a(libpython%d.%d.so)",
               pyvers_major, pyvers_minor, pyvers_major, pyvers_minor);
     }
     else {
-      strncpy(dllname, status->cookie.pylibname, 64);
+      len = snprintf(dllname, DLLNAME_LEN, "%s", status->cookie.pylibname);
     }
 #else
-    len = 0;
-    strncpy(dllname, status->cookie.pylibname, 64);
+    len = snprintf(dllname, DLLNAME_LEN, "%s", status->cookie.pylibname);
 #endif
 
-    if (len >= 64 || dllname[64-1] != '\0') {
-        FATALERROR("DLL name length exceeds buffer\n");
+    if (len >= DLLNAME_LEN) {
+        FATALERROR("Reported length (%d) of DLL name (%s) length exceeds buffer[%d] space\n",
+                   len, status->cookie.pylibname, DLLNAME_LEN);
         return -1;
     }
 
@@ -105,9 +99,13 @@ pyi_pylib_load(ARCHIVE_STATUS *status)
      */
     if (status->has_temp_directory) {
         char ucrtpath[PATH_MAX];
-        pyi_path_join(ucrtpath, status->temppath, "ucrtbase.dll");
+        if (pyi_path_join(ucrtpath,
+                          status->temppath, "ucrtbase.dll") == NULL) {
+            FATALERROR("Path of ucrtbase.dll (%s) length exceeds "
+                       "buffer[%d] space\n", status->temppath, PATH_MAX);
+        };
         if (pyi_path_exists(ucrtpath)) {
-            VS("LOADER: ucrtbase.dll is exists: %s\n", ucrtpath);
+            VS("LOADER: ucrtbase.dll found: %s\n", ucrtpath);
             pyi_utils_dlopen(ucrtpath);
         }
     }
@@ -117,7 +115,10 @@ pyi_pylib_load(ARCHIVE_STATUS *status)
      * Look for Python library in homepath or temppath.
      * It depends on the value of mainpath.
      */
-    pyi_path_join(dllpath, status->mainpath, dllname);
+    if (pyi_path_join(dllpath, status->mainpath, dllname) == NULL) {
+        FATALERROR("Path of DLL (%s) length exceeds buffer[%d] space\n",
+                   status->mainpath, PATH_MAX);
+    };
 
     VS("LOADER: Python library: %s\n", dllpath);
 
@@ -149,8 +150,9 @@ pyi_pylib_attach(ARCHIVE_STATUS *status, int *loadedNew)
     HMODULE dll;
     char nm[PATH_MAX + 1];
     int ret = 0;
+
     /* Get python's name */
-    sprintf(nm, "python%02d.dll", pyvers);
+    sprintf(nm, "python%d%d.dll", pyvers / 100, pyvers % 100);
 
     /* See if it's loaded */
     dll = GetModuleHandleA(nm);
@@ -191,7 +193,7 @@ pyi_pylib_set_runtime_opts(ARCHIVE_STATUS *status)
     *PI_Py_NoUserSiteDirectory = 1;
     /* This flag ensures PYTHONPATH and PYTHONHOME are ignored by Python. */
     *PI_Py_IgnoreEnvironmentFlag = 1;
-    /* Disalbe verbose imports by default. */
+    /* Disable verbose imports by default. */
     *PI_Py_VerboseFlag = 0;
 
     /* Override some runtime options by custom values from PKG archive.
@@ -239,9 +241,74 @@ pyi_pylib_set_runtime_opts(ARCHIVE_STATUS *status)
         setbuf(stdin, (char *)NULL);
         setbuf(stdout, (char *)NULL);
         setbuf(stderr, (char *)NULL);
+
+        /* Enable unbuffered mode via Py_UnbufferedStdioFlag */
+        *PI_Py_UnbufferedStdioFlag = 1;
     }
     return 0;
 }
+
+/* Enable UTF-8 mode as per PEP540.
+ * It seems Py_UTF8Mode must be set before Py_SetPath is called, but
+ * in practice, it is probably a good idea to call it before any
+ * Py_* functions are used
+ */
+static void
+pyi_pylib_set_pep540_utf8_mode()
+{
+    int enable_utf8_mode = -1;
+    char *env_utf8 = NULL;
+
+    /* Honor the setting via PYTHONUTF8 environment variable (valid
+     * values are 0 and 1, same as with python interpreter) */
+    env_utf8 = pyi_getenv("PYTHONUTF8");
+    if (env_utf8) {
+        if (strcmp(env_utf8, "0") == 0) {
+            enable_utf8_mode = 0;
+        } else if (strcmp(env_utf8, "1") == 0) {
+            enable_utf8_mode = 1;
+        } else {
+            OTHERERROR("Invalid value for PYTHONUTF8=%s; disabling utf-8 mode!\n", env_utf8);
+            enable_utf8_mode = 0;
+        }
+    }
+
+#ifndef _WIN32
+    /* On non-Windows, the C locale and the POSIX locale enable the
+     * UTF-8 Mode (PEP 540) */
+    if (enable_utf8_mode < 0) {
+        const char *lc_ctype = NULL;
+        char *orig_lc_ctype = NULL;
+
+        /* Get original value of LC_CTYPE. */
+        lc_ctype = setlocale(LC_CTYPE, NULL);
+        if (lc_ctype) {
+            orig_lc_ctype = strdup(lc_ctype);
+        }
+
+        /* Set user-preferred locale, and retrieve corresponding LC_CTYPE. */
+        lc_ctype = setlocale(LC_CTYPE, "");
+        if (lc_ctype != NULL && (strcmp(lc_ctype, "C") == 0 || strcmp(lc_ctype, "POSIX") == 0)) {
+            enable_utf8_mode = 1;
+        }
+
+        /* Restore old value. */
+        if (orig_lc_ctype) {
+            setlocale(LC_CTYPE, orig_lc_ctype);
+            free(orig_lc_ctype);
+        }
+    }
+#endif
+
+    /* Enable/disable UTF-8 mode */
+    if (enable_utf8_mode > 0) {
+        VS("LOADER: Enabling UTF-8 mode\n");
+        *PI_Py_UTF8Mode = 1;
+    } else {
+        *PI_Py_UTF8Mode = 0;
+    }
+}
+
 
 void
 pyi_free_wargv(wchar_t ** wargv)
@@ -249,7 +316,13 @@ pyi_free_wargv(wchar_t ** wargv)
     wchar_t ** arg = wargv;
 
     while (arg[0]) {
+#ifdef _WIN32
+        // allocated using `malloc` in pyi_win32_wargv_from_utf8
         free(arg[0]);
+#else
+        // allocated using Py_DecodeLocale in pyi_wargv_from_argv
+        PI_PyMem_RawFree(arg[0]);
+#endif
         arg++;
     }
     free(wargv);
@@ -363,7 +436,7 @@ pyi_locale_char2wchar(wchar_t * dst, char * src, size_t len)
         return NULL;
     }
     wcsncpy(dst, buffer, len);
-    free(buffer);
+    PI_PyMem_RawFree(buffer);
     return dst;
 #endif /* ifdef _WIN32 */
 }
@@ -381,16 +454,22 @@ pyi_pylib_start_python(ARCHIVE_STATUS *status)
      * That is, the APIs use the string pointer as given and will neither copy
      * its contents nor free its memory.
      *
-     * NOTE: Statics are zero-initialized. */
-    static char pypath[2 * PATH_MAX + 14];
+     * NOTE: Static variables are zero-initialized. */
+    #define MAX_PYPATH_SIZE (3 * PATH_MAX + 32)
+    static char pypath[MAX_PYPATH_SIZE];
 
     /* Wide string forms of the above, for Python 3. */
-    static wchar_t pypath_w[PATH_MAX + 1];
+    static wchar_t pypath_w[MAX_PYPATH_SIZE];
     static wchar_t pyhome_w[PATH_MAX + 1];
     static wchar_t progname_w[PATH_MAX + 1];
 
+    /* Enable PEP540 UTF-8 mode, if necessary. Must be done before Py_SetPath()
+     * is called for the setting to take effect (but we should probably also
+     * set it before pyi_locale_char2wchar() calls). */
+    pyi_pylib_set_pep540_utf8_mode();
+
     /* Decode using current locale */
-    if (!pyi_locale_char2wchar(progname_w, status->archivename, PATH_MAX)) {
+    if (!pyi_locale_char2wchar(progname_w, status->executablename, PATH_MAX)) {
         FATALERROR("Failed to convert progname to wchar_t\n");
         return -1;
     }
@@ -409,19 +488,27 @@ pyi_pylib_start_python(ARCHIVE_STATUS *status)
     PI_Py_SetPythonHome(pyhome_w);
 
     /* Set sys.path */
-    /* sys.path = [base_library, mainpath] */
-    strncpy(pypath, status->mainpath, strlen(status->mainpath));
-    strncat(pypath, PYI_SEPSTR, strlen(PYI_SEPSTR));
-    strncat(pypath, "base_library.zip", strlen("base_library.zip"));
-    strncat(pypath, PYI_PATHSEPSTR, strlen(PYI_PATHSEPSTR));
-    strncat(pypath, status->mainpath, strlen(status->mainpath));
+    /* sys.path = [mainpath/base_library.zip, mainpath/lib-dynload, mainpath] */
+    if (snprintf(pypath, MAX_PYPATH_SIZE, "%s%c%s" "%c" "%s%c%s" "%c" "%s",
+                 status->mainpath, PYI_SEP, "base_library.zip",
+                 PYI_PATHSEP,
+                 status->mainpath, PYI_SEP, "lib-dynload",
+                 PYI_PATHSEP,
+                 status->mainpath)
+        >= MAX_PYPATH_SIZE) {
+        // This should never happen, since mainpath is < PATH_MAX and pypath is
+        // huge enough
+        FATALERROR("sys.path (based on %s) exceeds buffer[%d] space\n",
+                   status->mainpath, MAX_PYPATH_SIZE);
+        return -1;
+    }
 
     /*
-     * E must set sys.path to have base_library.zip before
+     * We must set sys.path to have base_library.zip before
      * calling Py_Initialize as it needs `encodings` and other modules.
      */
     /* Decode using current locale */
-    if (!pyi_locale_char2wchar(pypath_w, pypath, PATH_MAX)) {
+    if (!pyi_locale_char2wchar(pypath_w, pypath, MAX_PYPATH_SIZE)) {
         FATALERROR("Failed to convert pypath to wchar_t\n");
         return -1;
     }
@@ -479,7 +566,7 @@ pyi_pylib_start_python(ARCHIVE_STATUS *status)
 
     /* Check for a python error */
     if (PI_PyErr_Occurred()) {
-        FATALERROR("Error detected starting Python VM.");
+        FATALERROR("Error detected starting Python VM.\n");
         return -1;
     }
 
@@ -492,9 +579,6 @@ pyi_pylib_start_python(ARCHIVE_STATUS *status)
 int
 pyi_pylib_import_modules(ARCHIVE_STATUS *status)
 {
-    PyObject *marshal;
-    PyObject *marshaldict;
-    PyObject *loadfunc;
     TOC *ptoc;
     PyObject *co;
     PyObject *mod;
@@ -521,14 +605,6 @@ pyi_pylib_import_modules(ARCHIVE_STATUS *status)
 
     VS("LOADER: importing modules from CArchive\n");
 
-    /* Get the Python function marshall.load
-     * Here we collect some reference to PyObject that we don't dereference
-     * Doesn't matter because the objects won't be going away anyway.
-     */
-    marshal = PI_PyImport_ImportModule("marshal");
-    marshaldict = PI_PyModule_GetDict(marshal);
-    loadfunc = PI_PyDict_GetItemString(marshaldict, "loads");
-
     /* Iterate through toc looking for module entries (type 'm')
      * this is normally just bootstrap stuff (archive and iu)
      */
@@ -541,35 +617,21 @@ pyi_pylib_import_modules(ARCHIVE_STATUS *status)
 
             VS("LOADER: extracted %s\n", ptoc->name);
 
-            /* .pyc/.pyo files have 8 bytes header. Skip it and load marshalled
-             * data form the right point.
-             */
-            if (pyvers >= 37) {
-                /* Python >= 3.7 the header: size was changed to 16 bytes. */
-                co = PI_PyObject_CallFunction(loadfunc, "y#", modbuf + 16,
-                                              ntohl(ptoc->ulen) - 16);
-            }
-            else {
-                /* It looks like from python 3.3 the header */
-                /* size was changed to 12 bytes. */
-                co =
-                    PI_PyObject_CallFunction(loadfunc, "y#", modbuf + 12, ntohl(
-                                                 ptoc->ulen) - 12);
-            };
+            /* Unmarshal the stored code object */
+            co = PI_PyMarshal_ReadObjectFromString((const char *) modbuf, ptoc->ulen);
 
             if (co != NULL) {
-                VS("LOADER: callfunction returned...\n");
+                VS("LOADER: running unmarshalled code object for %s...\n", ptoc->name);
                 mod = PI_PyImport_ExecCodeModule(ptoc->name, co);
             }
             else {
-                /* TODO callfunctions might return NULL - find yout why and foor what modules. */
-                VS("LOADER: callfunction returned NULL");
+                VS("LOADER: failed to unmarshal code object for %s!\n", ptoc->name);
                 mod = NULL;
             }
 
             /* Check for errors in loading */
             if (mod == NULL) {
-                FATALERROR("mod is NULL - %s", ptoc->name);
+                FATALERROR("Module object for %s is NULL!\n", ptoc->name);
             }
 
             if (PI_PyErr_Occurred()) {
@@ -601,7 +663,7 @@ int
 pyi_pylib_install_zlib(ARCHIVE_STATUS *status, TOC *ptoc)
 {
     int rc = 0;
-    int zlibpos = status->pkgstart + ntohl(ptoc->pos);
+    unsigned long long zlibpos = status->pkgstart + ptoc->pos;
     PyObject * sys_path, *zlib_entry, *archivename_obj;
 
     /* Note that sys.path contains PyUnicode on py3. Ensure
@@ -619,7 +681,7 @@ pyi_pylib_install_zlib(ARCHIVE_STATUS *status, TOC *ptoc)
      */
     archivename_obj = PI_PyUnicode_DecodeFSDefault(status->archivename);
 #endif
-    zlib_entry = PI_PyUnicode_FromFormat("%U?%d", archivename_obj, zlibpos);
+    zlib_entry = PI_PyUnicode_FromFormat("%U?%llu", archivename_obj, zlibpos);
     PI_Py_DecRef(archivename_obj);
 
     sys_path = PI_PySys_GetObject("path");
@@ -674,6 +736,30 @@ pyi_pylib_finalize(ARCHIVE_STATUS *status)
      * loaded then calling this function might cause some segmentation faults.
      */
     if (status->is_pylib_loaded == true) {
+        #ifndef WINDOWED
+            /*
+             * We need to manually flush the buffers because otherwise there can be errors.
+             * The native python interpreter flushes buffers before calling Py_Finalize,
+             * so we need to manually do the same. See isse #4908.
+             */
+
+            VS("LOADER: Manually flushing stdout and stderr\n");
+
+            /* sys.stdout.flush() */
+            PI_PyRun_SimpleStringFlags(
+                "import sys; sys.stdout.flush(); \
+                (sys.__stdout__.flush if sys.__stdout__ \
+                is not sys.stdout else (lambda: None))()", NULL);
+
+            /* sys.stderr.flush() */
+            PI_PyRun_SimpleStringFlags(
+                "import sys; sys.stderr.flush(); \
+                (sys.__stderr__.flush if sys.__stderr__ \
+                is not sys.stderr else (lambda: None))()", NULL);
+
+        #endif
+
+        /* Finalize the interpreter. This function call calls all of the atexit functions. */
         VS("LOADER: Cleaning up Python interpreter.\n");
         PI_Py_Finalize();
     }

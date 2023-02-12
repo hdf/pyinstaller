@@ -1,10 +1,10 @@
 Advanced Topics
 ================
 
-The following discussions cover details of |PyInstaller| internal methods.
+The following discussions cover details of PyInstaller internal methods.
 You should not need this level of detail for normal use,
 but such details are helpful if you want to investigate
-the |PyInstaller| code and possibly contribute to it,
+the PyInstaller code and possibly contribute to it,
 as described in `How to Contribute`_.
 
 
@@ -18,7 +18,7 @@ script can begin execution.
 A summary of these steps was given in the Overview
 (:ref:`How the One-Folder Program Works` and
 :ref:`How the One-File Program Works`).
-Here is more detail to help you understand what the |bootloader|
+Here is more detail to help you understand what the bootloader
 does and how to figure out problems.
 
 
@@ -78,7 +78,7 @@ Running Python code requires several steps:
    It sets up the Python import mechanism to load modules
    only from archives embedded in the executable.
    It also adds the attributes ``frozen``
-   and ``_MEIPASS`` to the ``sys`` built-in module.
+   and ``_MEIPASS`` to the :mod:`sys` built-in module.
 
 2. Execute any run-time hooks: first those specified by the
    user, then any standard ones.
@@ -86,9 +86,9 @@ Running Python code requires several steps:
 3. Install python "egg" files.
    When a module is part of a zip file (.egg),
    it has been bundled into the :file:`./eggs` directory.
-   Installing means appending .egg file names to ``sys.path``.
+   Installing means appending .egg file names to :data:`sys.path`.
    Python automatically detects whether an
-   item in ``sys.path`` is a zip file or a directory.
+   item in :data:`sys.path` is a zip file or a directory.
 
 4. Run the main script.
 
@@ -96,9 +96,9 @@ Running Python code requires several steps:
 Python imports in a bundled app
 -------------------------------------
 
-|PyInstaller| embeds compiled python code
+PyInstaller embeds compiled python code
 (``.pyc`` files) within the executable.
-|PyInstaller| injects its code into the
+PyInstaller injects its code into the
 normal Python import mechanism.
 Python allows this;
 the support is described in :pep:`302`  "New Import Hooks".
@@ -110,10 +110,10 @@ bundled with the app) and for C-extensions.
 The code can be read in :file:`./PyInstaller/loader/pyi_mod03_importers.py`.
 
 At runtime the PyInstaller :pep:`302` hooks are appended
-to the variable ``sys.meta_path``.
+to the variable :data:`sys.meta_path`.
 When trying to import modules the interpreter will
-first try PEP 302 hooks in ``sys.meta_path``
-before searching in ``sys.path``.
+first try PEP 302 hooks in :data:`sys.meta_path`
+before searching in :data:`sys.path`.
 As a result, the Python interpreter
 loads imported python modules from the archive embedded
 in the bundled executable.
@@ -123,7 +123,7 @@ in a bundled app:
 
 1. Is it a built-in module?
    A list of built-in modules is in variable
-   ``sys.builtin_module_names``.
+   :data:`sys.builtin_module_names`.
 
 2. Is it a module embedded in the executable?
    Then load it from embedded archive.
@@ -133,12 +133,136 @@ in a bundled app:
    :file:`{package.subpackage.module}.pyd` or
    :file:`{package.subpackage.module}.so`.
 
-4. Next examine paths in the ``sys.path``.
+4. Next examine paths in the :data:`sys.path`.
    There could be any additional location with python modules
    or ``.egg`` filenames.
 
 5. If the module was not found then
-   raise ``ImportError``.
+   raise :class:`ImportError`.
+
+Splash screen startup
+-------------------------------------
+
+.. Note::
+    This feature is incompatible with macOS. In the current design, the
+    splash screen operates in a secondary thread, which is disallowed by
+    the Tcl/Tk (or rather, the underlying GUI toolkit) on macOS.
+
+
+If a splash screen is bundled with the application the
+bootloaders startup procedure and threading model is a little
+more complex. The following describes the order of operation if
+a splash screen is bundled:
+
+1. The bootloader checks if it runs as the outermost application
+   (Not the child process which was spawned by the bootloader).
+
+2. If splash screen resources are bundled, try to extract them
+   (onefile mode). The extraction path is inside
+   :file:`{temppath}/_MEI{xxxxxx}/__splash{x}`. If in onedir mode,
+   the application assumes the resources are relative to the
+   executable.
+
+3. Load the tcl and tk shared libraries into the bootloader.
+
+    - Windows: ``tcl86t.dll``/``tk86t.dll``
+    - Linux: ``libtcl.so``/``libtk.so``
+
+4. Prepare a minimal environment for the `Tcl/Tk`_ interpreter
+   by replacing/modifying the following functions:
+
+    1. ``::tclInit``: This command is called to find the
+       standard library of tcl. We replace this command to
+       force tcl to load/execute only the bundled modules.
+
+    2. ``::tcl_findLibrary``: Tk uses this function to source
+       all its components. The overwritten function sets the
+       required environment variable and evaluates the requested
+       file.
+
+    3. ``::exit``: This function is modified to ensure a
+       proper exit of the splash screen thread.
+
+    4. ``::source``: This command executes the contents of a
+       passed file. Since we run in a minimal environment we
+       mock the execution of not bundled files and execute
+       those who are.
+
+5. Start the tcl interpreter and execute the splash screen
+   script which was generated by PyInstaller's build target
+   :mod:`Splash` at build time. This script creates the
+   environment variable ``_PYIBoot_SPLASH``, which is also
+   available to the python interpreter. It also initializes a
+   tcp server socket to receive commands from python.
+
+.. Note::
+   The tcl interpreter is started in a separate thread. Only
+   after the tcl interpreter has executed the splash
+   screen script, the bootloader thread, which is responsible
+   for extraction/starting the python interpreter, is
+   resumed.
+
+
+.. _pyi_splash Module:
+
+:mod:`pyi_splash` Module (Detailed)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module connects to the bootloader to send messages to the splash screen.
+
+It is intended to act as an RPC interface for the functions provided by the
+bootloader, such as displaying text or closing. This makes the users python
+program independent of how the communication with the bootloader is
+implemented, since a consistent API is provided.
+
+To connect to the bootloader, it connects to a local tcp server socket whose port
+is passed through the environment variable ``_PYIBoot_SPLASH``. The bootloader
+connects to the socket via the python module ``_socket``. Although this socket
+is bidirectional, the module is only configured to send data.
+Since the os-module, which is needed to request the environment variable,
+is not available at boot time, the module does not establish the connection
+until initialization.
+
+This module does not support reloads while the splash screen is displayed, i.e.
+it cannot be reloaded (such as by :func:`importlib.reload`), because the splash
+screen closes automatically when the connection to this instance of the
+module is lost.
+
+Functions
+---------
+
+.. py:module:: pyi_splash
+.. py:currentmodule:: pyi_splash
+
+.. Note::
+    Note that if the ``_PYIBoot_SPLASH`` environment variable does not exist or an
+    error occurs during the connection, the module will **not** raise an error, but simply
+    not initialize itself (i.e. :func:`pyi_splash.is_alive` will return ``False``). Before
+    sending commands to the splash screen, one should check if the module was initialized
+    correctly, otherwise a :class:`RuntimeError` will be raised.
+
+.. py:function:: is_alive()
+
+    Indicates whether the module can be used.
+
+    Returns ``False`` if the module is either not initialized or was disabled
+    by closing the splash screen. Otherwise, the module should be usable.
+
+.. py:function:: update_text(msg)
+
+    Updates the text on the splash screen window.
+
+    :param str msg: the text to be displayed
+    :raises ConnectionError: If the OS fails to write to the socket
+    :raises RuntimeError: If the module is not initialized
+
+.. py:function:: close()
+
+    Close the connection to the ipc tcp server socket
+
+    This will close the splash screen and renders this module unusable.
+    After this function is called, no connection can be opened to the splash
+    screen again and all functions if this module become unusable
 
 
 .. _the toc and tree classes:
@@ -146,7 +270,7 @@ in a bundled app:
 The TOC and Tree Classes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-|PyInstaller| manages lists of files using the ``TOC``
+PyInstaller manages lists of files using the ``TOC``
 (Table Of Contents) class.
 It provides the ``Tree`` class as a convenient way to build a ``TOC``
 from a folder path.
@@ -195,7 +319,7 @@ it is not necessary to give accurate *path* and *typecode* elements when subtrac
 In order to add files to a TOC, you need to know the *typecode* values
 and their related *path* values.
 A *typecode* is a one-word string.
-|PyInstaller| uses a number of *typecode* values internally,
+PyInstaller uses a number of *typecode* values internally,
 but for the normal case you need to know only these:
 
 
@@ -219,7 +343,7 @@ for example a dynamic library.
 The types are treated the same.
 ``EXTENSION`` is generally used for a Python extension module,
 for example a module compiled by Cython_.
-|PyInstaller| will examine either type of file for dependencies,
+PyInstaller will examine either type of file for dependencies,
 and if any are found, they are also included.
 
 The Tree Class
@@ -292,7 +416,7 @@ Inspecting Archives
 
 An archive is a file that contains other files,
 for example a ``.tar`` file, a ``.jar`` file, or a ``.zip`` file.
-Two kinds of archives are used in |PyInstaller|.
+Two kinds of archives are used in PyInstaller.
 One is a ZlibArchive, which
 allows Python modules to be stored efficiently and,
 with some import hooks, imported directly.
@@ -319,7 +443,7 @@ All parts of a ZlibArchive are stored in the
 
 A ZlibArchive is used at run-time to import bundled python modules.
 Even with maximum compression this works  faster than the normal import.
-Instead of searching ``sys.path``, there's a lookup in the dictionary.
+Instead of searching :data:`sys.path`, there's a lookup in the dictionary.
 There are no directory operations and no
 file to open (the file is already open).
 There's just a seek, a read and a decompress.
@@ -389,7 +513,7 @@ Use the ``pyi-archive_viewer`` command to inspect any type of archive:
       ``pyi-archive_viewer`` *archivefile*
 
 With this command you can examine the contents of any archive built with
-|PyInstaller| (a ``PYZ`` or ``PKG``), or any executable (``.exe`` file
+PyInstaller (a ``PYZ`` or ``PKG``), or any executable (``.exe`` file
 or an ELF or COFF binary).
 The archive can be navigated using these commands:
 
@@ -439,7 +563,7 @@ and writes to stdout all its binary dependencies.
 This is handy to find out which DLLs are required by
 an executable or by another DLL.
 
-``pyi-bindepend`` is used by |PyInstaller| to
+``pyi-bindepend`` is used by PyInstaller to
 follow the chain of dependencies of binary extensions
 during Analysis.
 
@@ -455,19 +579,19 @@ the two bundles should be exactly, bit-for-bit identical.
 
 That is not the case normally.
 Python uses a random hash to make dicts and other hashed types,
-and this affects compiled byte-code as well as |PyInstaller|
+and this affects compiled byte-code as well as PyInstaller
 internal data structures.
 As a result, two builds may not produce bit-for-bit identical results
 even when all the components of the application bundle are the same
 and the two applications execute in identical ways.
 
-You can assure that a build will produce the same bits
-by setting the ``PYTHONHASHSEED`` environment variable to a known
-integer value before running |PyInstaller|.
+You can ensure that a build will produce the same bits
+by setting the :envvar:`PYTHONHASHSEED` environment variable to a known
+integer value before running PyInstaller.
 This forces Python to use the same random hash sequence until
-``PYTHONHASHSEED`` is unset or set to ``'random'``.
-For example, execute |PyInstaller| in a script such as
-the following (for GNU/Linux and OS X)::
+:envvar:`PYTHONHASHSEED` is unset or set to ``'random'``.
+For example, execute PyInstaller in a script such as
+the following (for GNU/Linux and macOS)::
 
     # set seed to a known repeatable integer value
     PYTHONHASHSEED=1
@@ -478,6 +602,13 @@ the following (for GNU/Linux and OS X)::
     cksum dist/myscript/myscript | awk '{print $1}' > dist/myscript/checksum.txt
     # let Python be unpredictable again
     unset PYTHONHASHSEED
+
+.. versionchanged:: 4.8
+   The build timestamp in the PE headers of the generated Windows
+   executables is set to the current time during the assembly process.
+   A custom timestamp value can be specified via the ``SOURCE_DATE_EPOCH``
+   environment variable to achieve `reproducible builds
+   <https://reproducible-builds.org/docs/source-date-epoch>`_.
 
 
 .. include:: _common_definitions.txt

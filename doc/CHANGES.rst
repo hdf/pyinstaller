@@ -10,1026 +10,2109 @@ Changelog for PyInstaller
    To add a new change log entry, please see
    https://pyinstaller.readthedocs.io/en/latest/development/changelog-entries.html
 
+.. Preview unreleased news fragments.
+.. towncrier-draft-entries:: The Next Release
+
 .. towncrier release notes start
 
-4.0 (unreleased)
-----------------
-
-- Nothing changed yet.
-
-
-3.6 (2020-01-09)
---------------------------
-
-**Important:** This is the last release of PyInstaller supporting Python 2.7.
-Python 2 is end-of-life, many packages are about to `drop support for Python
-2.7 <https://python3statement.org/>`_ - or already did it.
-
-Security
-~~~~~~~~
-
-* [SECURITY] (Win32) Fix CVE-2019-16784: Local Privilege Escalation caused by
-  insecure directory permissions of sys._MEIPATH. This security fix effects all
-  Windows software frozen by PyInstaller in "onefile" mode.
-  While PyInstaller itself was not vulnerable, all Windows software frozen
-  by PyInstaller in "onefile" mode is vulnerable.
-
-  If you are using PyInstaller to freeze Windows software using "onefile"
-  mode, you should upgrade PyInstaller and rebuild your software.
-
+5.8.0 (2023-02-11)
+------------------
 
 Features
 ~~~~~~~~
 
-* (Windows): Applications built in windowed mode have their debug messages
-  sent to any attached debugger or DebugView instead of message boxes.
-  (:issue:`#4288`)
-* Better error message when file exists at path we want to be dir.
-  (:issue:`#4591`)
+* Compile the collected GLib schema files using ``glib-schema-compiler``
+  instead of collecting the pre-compiled ``gschemas.compiled`` file, in
+  order to properly support collection of schema files from multiple
+  locations. Do not collect the source schema files anymore, as only
+  ``gschemas.compiled`` file should be required at run time. (:issue:`7394`)
 
 
 Bugfix
 ~~~~~~
 
-* (Windows) Allow usage of `VSVersionInfo` as version argument to EXE again.
-  (:issue:`#4381`, :issue:`#4539`)
-* (Windows) Fix MSYS2 dll's are not found by modulegraph. (:issue:`#4125`,
-  :issue:`#4417`)
-* (Windows) The temporary copy of bootloader used add resources, icons, etc.
-  is not created in --workpath instead of in  %TEMP%. This fixes issues on
-  systems where the anti-virus cleans %TEMP% immediatly. (:issue:`#3869`)
-* Do not fail the build when ``ldconfig`` is missing/inoperable.
-  (:issue:`#4261`)
-* Fixed loading of IPython extensions. (:issue:`#4271`)
-* Fixed pre-find-module-path hook for `distutils` to be compatible with
-  `virtualenv >= 16.3`. (:issue:`#4064`, :issue:`#4372`)
-* Improve error reporting when the Python library can't be found.
-  (:issue:`#4162`)
-
-
-Hooks
-~~~~~
-
-* Add hook for
-  avro (serialization and RPC framework) (:issue:`#4388`),
-  `django-babel <https://github.com/python-babel/django-babel>`_ (:issue:`#4516`),
-  `enzyme <https://pypi.org/project/enzyme/>`_ (:issue:`#4338`),
-  google.api (resp. google.api.core) (:issue:`#3251`),
-  google.cloud.bigquery (:issue:`#4083`, :issue:`#4084`),
-  google.cloud.pubsub (:issue:`#4446`),
-  google.cloud.speech (:issue:`#3888`),
-  nnpy (:issue:`#4483`),
-  passlib (:issue:`#4520`),
-  `pyarrow <https://pypi.org/project/pyarrow/>`_ (:issue:`#3720`, :issue:`#4517`),
-  pyexcel and its plugins io, ods, ods3, odsr, xls, xlsx, xlsxw (:issue:`#4305`),
-  pysnmp (:issue:`#4287`),
-  scrapy (:issue:`#4514`),
-  skimage.io (:issue:`#3934`),
-  sklearn.mixture (:issue:`#4612`),
-  sounddevice on macOS and Windows (:issue:`#4498`),
-  text-unidecode (:issue:`#4327`, :issue:`#4530`),
-  the google-cloud-kms client library (:issue:`#4408`),
-  ttkwidgets (:issue:`#4484`), and
-  webrtcvad (:issue:`#4490`).
-* Correct the location of Qt translation files. (:issue:`#4429`)
-* Exclude imports for pkg_resources to fix bundling issue. (:issue:`#4263`,
-  :issue:`#4360`)
-* Fix hook for pywebview to collect all required libraries and data-files.
-  (:issue:`#4312`)
-* Fix hook numpy and hook scipy to account for differences in location of extra
-  dlls on Windows. (:issue:`#4593`)
-* Fix pysoundfile hook to bundle files correctly on both OSX and Windows.
-  (:issue:`#4325`)
-* Fixed hook for `pint <https://github.com/hgrecco/pint>`_
-  to also copy metadata as required to retrieve the version at runtime.
-  (:issue:`#4280`)
-* Fixed PySide2.QtNetwork hook by mirroring PyQt5 approach. (:issue:`#4467`,
-  :issue:`#4468`)
-* Hook for pywebview now collects data files and dynamic libraries only for the
-  correct OS (Windows).
-  Hook for pywebview now bundles only the required 'lib' subdirectory.
-  (:issue:`#4375`)
-* Update hooks related to PySide2.QtWebEngineWidgets, ensure the relevant
-  supporting files required for a QtWebEngineView are copied into the
-  distribution. (:issue:`#4377`)
-* Update PyQt5 loader to support PyQt >=5.12.3. (:issue:`#4293`,
-  :issue:`#4332`)
-* Update PyQt5 to package 64-bit SSL support DLLs. (:issue:`#4321`)
-* Update PyQt5 to place OpenGL DLLs correctly for PyQt >= 5.12.3.
-  (:issue:`#4322`)
-* (GNU/Linux) Make hook for GdkPixbuf compatible with Ubuntu and Debian
-  (:issue:`#4486`).
-
-
-Bootloader
-~~~~~~~~~~
-
-* (OSX): Added support for appending URL to program arguments when applications
-  is launched from custom protocol handler. (:issue:`#4397`, :issue:`#4399`)
-* (POSIX) For one-file binaries, if the program is started via a symlink, the
-  second process now keeps the basename of the symlink. (:issue:`#3823`,
-  :issue:`#3829`)
-* (Windows) If bundled with the application, proactivley load ``ucrtbase.dll``
-  before loading the Python library. This works around unresolved symbol errors
-  when loading ``python35.dll`` (or later) on legacy Windows (7, 8, 8.1)
-  systems
-  with Universal CRT update is not installed. (:issue:`#1566`, :issue:`#2170`,
-  :issue:`#4230`)
-* Add our own implementation for ``strndup`` and ``strnlen`` to be used on
-  pattforms one of these is missing.
-
-
-PyInstaller Core
-~~~~~~~~~~~~~~~~
-
-* Now uses hash based `.pyc` files as specified in :pep:`552` in
-  `base_library.zip` when using Python 3.7 (:issue:`#4096`)
-
-
-Bootloader build
-~~~~~~~~~~~~~~~~
-
-* (MinGW-w64) Fix .rc.o file not found error. (:issue:`#4501`, :issue:`#4586`)
-* Add a check whether ``strndup`` and ``strnlen`` are available.
-* Added OpenBSD support. (:issue:`#4545`)
-* Fix build on Solaris 10.
-* Fix checking for compiler flags in `configure` phase. The check for compiler
-  flags actually did never work. (:issue:`#4278`)
-* Update url for public key in update-waf script. (:issue:`#4584`)
-* Update waf to version 2.0.19.
-
-
-3.5 (2019-07-09)
-----------------
-
-Features
-~~~~~~~~
-
-* (Windows) Force ``--windowed`` option if first script is a ``.pyw`` file.
-  This might still be overwritten in the spec-file. (:issue:`#4001`)
-* Add support for relative paths for icon-files, resource-files and
-  version-resource-files. (:issue:`#3333`, :issue:`#3444`)
-* Add support for the RedHat Software Collections (SCL) Python 3.x.
-  (:issue:`#3536`, :issue:`#3881`)
-* Install platform-specific dependencies only on that platform.
-  (:issue:`#4166`, :issue:`#4173`)
-* New command-line option ``--upx-exclude``, which allows the user to prevent
-  binaries from being compressed with UPX. (:issue:`#3821`)
-
-
-Bugfix
-~~~~~~
-
-* (conda) Fix detection of conda/anaconda platform.
-* (GNU/Linux) Fix Anaconda Python library search. (:issue:`#3885`,
-  :issue:`#4015`)
-* (Windows) Fix UAC in one-file mode by embedding the manifest.
-  (:issue:`#1729`, :issue:`#3746`)
-* (Windows\\Py3.7) Now able to locate pylib when VERSION.dll is listed in
-  python.exe PE Header rather than pythonXY.dll (:issue:`#3942`,
-  :issue:`#3956`)
-* Avoid errors if PyQt5 or PySide2 is referenced by the modulegraph but isn't
-  importable. (:issue:`#3997`)
-* Correctly parse the ``--debug=import``, ``--debug=bootloader``, and
-  ``--debug=noarchive`` command-line options. (:issue:`#3808`)
-* Don't treat PyQt5 and PySide2 files as resources in an OS X windowed build.
-  Doing so causes the resulting frozen app to fail under Qt 5.12.
-  (:issue:`#4237`)
-* Explicitly specify an encoding of UTF-8 when opening *all* text files.
-  (:issue:`#3605`)
-* Fix appending the content of ``datas`` in a `spec` files to ``binaries``
-  instead of the internal ``datas``. (:issue:`#2326`, :issue:`#3694`)
-* Fix crash when changing from ``--onefile`` to ``--onedir`` on consecutive
-  runs. (:issue:`#3662`)
-* Fix discovery of Qt paths on Anaconda. (:issue:`#3740`)
-* Fix encoding error raised when reading a XML manifest file which includes
-  non-ASCII characters. This error inhibited building an executable which
-  has non-ASCII characters in the filename. (:issue:`#3478`)
-* Fix inputs to ``QCoreApplication`` constructor in ``Qt5LibraryInfo``. Now the
-  core application's initialization and finalization in addition to system-wide
-  and application-wide settings is safer. (:issue:`#4121`)
-* Fix installation with pip 19.0. (:issue:`#4003`)
-* Fixes PE-file corruption during version update. (:issue:`#3142`,
-  :issue:`#3572`)
-* In the fake ´site` module set `USER_BASE` to empty string instead of None
-  as Jupyter Notebook requires it to be a 'str'. (:issue:`#3945`)
-* Query PyQt5 to determine if SSL is supported, only adding SSL DLLs if so. In
-  addition, search the path for SSL DLLs, instead of looking in Qt's
-  ``BinariesPath``. (:issue:`#4048`)
-* Require ``pywin32-ctypes`` version 0.2.0, the minimum version which supports
-  Python 3.7. (:issue:`#3763`)
-* Use pkgutil instead of filesystem operations for interacting with the
-  modules. (:issue:`#4181`)
+* (Cygwin) Avoid using Windows-specific codepaths that require
+  ``pywin32-ctypes`` functionality that is not available in Cygwin
+  environment. (:issue:`7382`)
+* (non-Windows) Fix race condition in environment modification done by
+  ``multiprocessing`` runtime hook when multiple threads concurrently
+  spawn processes using the ``spawn`` method. (:issue:`7410`)
+* (Windows) Changes in the version info file now trigger rebuild of the
+  executable file. (:issue:`7338`)
+* Disallow empty source path in the ``binaries`` and ``datas`` tuples
+  that are returned from the hooks and sanitized in the
+  ``PyInstaller.building.utils.format_binaries_and_datas``. The empty
+  source path is usually result of an error in the hook's path retrieval
+  code, and causes implicit collection of the whole current working
+  directory. This is never the intended behavior, so raise a ``SystemExit``.
+  (:issue:`7384`)
+* Fix *unknown log level* error raised with ``--log-level=DEPRECATION``.
+  (:issue:`7413`)
 
 
 Incompatible Changes
 ~~~~~~~~~~~~~~~~~~~~
 
-* PyInstaller is no longer tested against Python 3.4, which is end-of-live.
-* Functions ``compat.architecture()``, ``compat.system()`` and
-  ``compat.machine()`` have been replace by variables of the same name. This
-  avoids evaluating the save several times.
-* Require an option for the ``--debug`` argument, rather than assuming a
-  default of ``all``. (:issue:`#3737`)
+* The deprecated ``PEP-302`` ``find_module()`` and ``load_module()``
+  methods have been removed from PyInstaller's ``FrozenImporter``. These
+  methods have not been used by python's import machinery since
+  python 3.4 and ``PEP-451``, and were effectively left untested and
+  unmaintained. The removal affects 3rd party code that still relies
+  on ``PEP-302`` finder/loader methods instead of the ``PEP-451`` ones.
+  (:issue:`7344`)
 
 
 Hooks
 ~~~~~
 
-* Added hooks for
-  `aliyunsdkcore <https://pypi.org/project/aliyun-python-sdk-core/>`_ (:issue:`#4228`),
-  astropy (:issue:`#4274`),
-  `BTrees <https://pypi.org/project/BTrees/>`_ (:issue:`#4239`),
-  dateparser.utils.strptime (:issue:`#3790`),
-  `faker <https://faker.readthedocs.io>`_ (:issue:`#3989`, :issue:`#4133`),
-  gooey (:issue:`#3773`),
-  GtkSourceView (:issue:`#3893`),
-  imageio_ffmpeg (:issue:`#4051`),
-  importlib_metadata and importlib_resources (:issue:`#4095`),
-  jsonpath_rw_ext (:issue:`#3841`),
-  jupyterlab (:issue:`#3951`),
-  lz4 (:issue:`#3710`),
-  `magic <https://pypi.org/project/python-magic-bin>`_ (:issue:`#4267`),
-  nanite (:issue:`#3860`),
-  nbconvert (:issue:`#3947`),
-  nbdime (:issue:`#3949`),
-  nbformat (:issue:`#3946`),
-  notebook (:issue:`#3950`),
-  pendulum (:issue:`#3906`),
-  pysoundfile (:issue:`#3844`),
-  python-docx (:issue:`#2574`, :issue:`#3848`),
-  python-wavefile (:issue:`#3785`),
-  pytzdata (:issue:`#3906`),
-  `PyWavelets pywt <https://github.com/PyWavelets/pywt>`_ (:issue:`#4120`),
-  pywebview (:issue:`#3771`),
-  radicale (:issue:`#4109`),
-  rdflib (:issue:`#3708`),
-  resampy (:issue:`#3702`),
-  `sqlalchemy-migrate <https://github.com/openstack/sqlalchemy-migrate>`_ (:issue:`#4250`),
-  `textdistance <https://pypi.org/project/textdistance/>`_ (:issue:`#4239`),
-  tcod (:issue:`#3622`),
-  ttkthemes (:issue:`#4105`), and
-  `umap-learn <https://umap-learn.readthedocs.io/en/latest/>`_ (:issue:`#4165`).
-  
-* Add runtime hook for certifi. (:issue:`#3952`)
-* Updated hook for 'notebook' to look in all Jupyter paths reported by
-  jupyter_core. (:issue:`#4270`)
-* Fixed hook for 'notebook' to only include directories that actually exist.
-  (:issue:`#4270`)
-  
-* Fixed pre-safe-import-module hook for `setuptools.extern.six`. (:issue:`#3806`)
-* Fixed QtWebEngine hook on OS X. (:issue:`#3661`)
-* Fixed the QtWebEngine hook on distributions which don't have a NSS subdir
-  (such as Archlinux) (:issue:`#3758`)
-* Include dynamically-imported backends in the ``eth_hash`` package.
-  (:issue:`#3681`)
-* Install platform-specific dependencies only on that platform.
-  (:issue:`#4168`)
-* Skip packaging PyQt5 QML files if the QML directory doesn't exist.
-  (:issue:`#3864`)
-* Support ECC in PyCryptodome. (:issue:`#4212`, :issue:`#4229`)
-* Updated PySide2 hooks to follow PyQt5 approach. (:issue:`#3655`,
-  :issue:`#3689`, :issue:`#3724`, :issue:`#4040`, :issue:`#4103`,
-  :issue:`#4136`, :issue:`#4175`, :issue:`#4177`, :issue:`#4198`,
-  :issue:`#4206`)
-* Updated the jsonschema hook for v3.0+. (:issue:`#4100`)
-* Updated the Sphinx hook to correctly package Sphinx 1.8.
-
-
-Bootloader
-~~~~~~~~~~
-
-* Update bundled zlib library to 1.2.11 address vulnerabilities.
-  (:issue:`#3742`)
-
-
-Documentation
-~~~~~~~~~~~~~
-
-* Update the text produced by ``--help`` to state that the ``--debug`` argument
-  requires an option. Correctly format this argument in the Sphinx build
-  process. (:issue:`#3737`)
-
-
-Project & Process
-~~~~~~~~~~~~~~~~~
-
-* Remove the PEP-518 "build-system" table from ``pyproject.toml`` to fix
-  installation with pip 19.0.
-
-
-PyInstaller Core
-~~~~~~~~~~~~~~~~
-
-* Add support for folders in `COLLECT` and `BUNDLE`. (:issue:`#3653`)
-* Completely remove `pywin32` dependency, which has erratic releases and
-  the version on pypi may no longer have future releases.
-  Require `pywin32-ctypes` instead which is pure python. (:issue:`#3728`,
-  :issue:`#3729`)
-* modulegraph: Align with upstream version 0.17.
-* Now prints a more descriptive error when running a tool fails (instead of
-  dumping a trace-back). (:issue:`#3772`)
-* Suppress warnings about missing UCRT dependencies on Win 10. (:issue:`#1566`,
-  :issue:`#3736`)
-
-
-Test-suite and Continuous Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-* Fix Appveyor failures of ``test_stderr_encoding()`` and
-  ``test_stdout_encoding()`` on Windows Python 3.7 x64. (:issue:`#4144`)
-* November update of packages used in testing. Prevent pyup from touching
-  ``test/requirements-tools.txt``. (:issue:`#3845`)
-* Rewrite code to avoid a ``RemovedInPytest4Warning: Applying marks directly to
-  parameters is deprecated, please use pytest.param(..., marks=...) instead.``
-* Run Travis tests under Xenial; remove the deprecated ``sudo: false`` tag.
-  (:issue:`#4140`)
-* Update the Markdown test to comply with `Markdown 3.0 changes
-  <https://python-markdown.github.io/change_log/release-3.0/#positional-arguments-deprecated>`_
-  by using correct syntax for `extensions
-  <https://python-markdown.github.io/reference/#extensions>`_.
-
-
-3.4 (2018-09-09)
-----------------
-
-Features
-~~~~~~~~
-
-* Add support for Python 3.7 (:issue:`#2760`, :issue:`#3007`, :issue:`#3076`,
-  :issue:`#3399`, :issue:`#3656`), implemented by Hartmut Goebel.
-* Improved support for Qt5-based applications (:issue:`#3439`).
-  By emulating much of the Qt deployment tools' behavior
-  most PyQt5 variants are supported.
-  However, Anaconda's PyQt5 packages are not supported
-  because its ``QlibraryInfo`` implementation reports incorrect values.
-  CI tests currently run on PyQt5 5.11.2. Many thanks to Bryan A. Jones for
-  taking this struggle.
-* ``--debug`` now allows more debugging to be activated more easily. This
-  includes bootloader messages, Python's "verbose imports" and store collected
-  Python files in the output directory instead of freezing. See ``pyinstaller
-  –-help`` for details. (:issue:`#3546`, :issue:`#3585`, :issue:`#3587`)
-* Hint users to install development package for missing `pyconfig.h`.
-  (:issue:`#3348`)
-* In ``setup.py`` specify Python versions this distribution is compatible with.
-* Make ``base_library.zip`` reproducible: Set time-stamp of files. (:issue:`#2952`,
-  :issue:`#2990`)
-* New command-line option ``--bootloader-ignore-signals`` to make the
-  bootloader forward all signals to the bundle application. (:issue:`#208`,
-  :issue:`#3515`)
-* (OS X) Python standard library module ``plistlib`` is now used for generating
-  the ``Info.plist`` file. This allows passing complex and nested data in
-  ``info_plist``. (:issue:`#3532`, :issue:`#3541`)
-
-
-Bugfix
-~~~~~~
-
-* Add missing ``warnings`` module to ``base_library.zip``. (:issue:`#3397`,
-  :issue:`#3400`)
-* Fix and simplify search for libpython on Windows, msys2, cygwin.
-  (:issue:`#3167`, :issue:`#3168`)
-* Fix incompatibility with `pycryptodome` (a replacement for the apparently
-  abandoned `pycrypto` library) when using encrypted PYZ-archives.
-  (:issue:`#3537`)
-* Fix race condition caused by the bootloader parent process terminating before
-  the child is finished. This might happen e.g. when the child process itself
-  plays with ``switch_root``. (:issue:`#2966`)
-* Fix wrong security alert if a filename contains ``..``. (:issue:`#2641`,
-  :issue:`#3491`)
-* Only update resources of cached files when necessary to keep signature valid.
-  (:issue:`#2526`)
-* (OS X) Fix: App icon appears in the dock, even if ``LSUIElement=True``.
-  (:issue:`#1917`, :issue:`#2075`, :issue:`#3566`)
-* (Windows) Fix crash when trying to add resources to Windows executable using
-  the ``--resource`` option. (:issue:`#2675`, :issue:`#3423`)
-* (Windows) Only update resources when necessary to keep signature valid
-  (:issue:`#3323`)
-* (Windows) Use UTF-8 when reading XML manifest file. (:issue:`#3476`)
-* (Windows) utils/win32: trap invalid ``--icon`` arguments and terminate with a
-  message. (:issue:`#3126`)
-
-
-Incompatible Changes
-~~~~~~~~~~~~~~~~~~~~
-
-* Drop support for Python 3.3 (:issue:`#3288`), Thanks to Hugo and xoviat.
-* ``--debug`` now expects an (optional) argument. Thus using ``… --debug
-  script.py`` will break. Use ``… script.py --debug`` or ``… --debug=all
-  script.py`` instead. Also ``--debug=all`` (which is the default if no
-  argument is given) includes ``noarchive``, which will store all collected
-  Python files in the output directory instead of freezing them. Use
-  ``--debug=bootloader`` to get the former behavior. (:issue:`#3546`,
-  :issue:`#3585`, :issue:`#3587`)
-* (minor) Change naming of intermediate build files and the `warn` file. This
-  only effects 3rd-party tools (if any exists) relying on the names of these
-  files.
-* (minor) The destination path for ``--add-data`` and ``--add-binary`` must no
-  longer be empty, use ``.`` instead. (:issue:`#3066`)
-* (minor) Use standard path, not dotted path, for C extensions (Python 3 only).
-
-
-Hooks
-~~~~~
-
-* New hooks for bokeh visualization library (:issue:`#3607`),
-  Champlain, Clutter (:issue:`#3443`) dynaconf (:issue:`#3641`), flex
-  (:issue:`#3401`), FMPy (:issue:`#3589`), gi.repository.xlib
-  (:issue:`#2634`, :issue:`#3396`) google-cloud-translate,
-  google-api-core (:issue:`#3658`), jedi (:issue:`#3535`,
-  :issue:`#3612`), nltk (:issue:`#3705`), pandas (:issue:`#2978`,
-  :issue:`#2998`, :issue:`#2999`, :issue:`#3015`, :issue:`#3063`,
-  :issue:`#3079`), phonenumbers (:issue:`#3381`, :issue:`#3558`),
-  pinyin (:issue:`#2822`), PySide.phonon, PySide.QtSql
-  (:issue:`#2859`), pytorch (:issue:`#3657`), scipy (:issue:`#2987`,
-  :issue:`#3048`), uvloop (:issue:`#2898`), web3, eth_account,
-  eth_keyfile (:issue:`#3365`, :issue:`#3373`).
-* Updated hooks for Cryptodome 3.4.8, Django 2.1, gevent 1.3.
-  Crypto (support for PyCryptodome) (:issue:`#3424`),
-  Gst and GdkPixbuf (to work on msys2, :issue:`#3257`, :issue:`#3387`),
-  sphinx 1.7.1, setuptools 39.0.
-* Updated hooks for PyQt5 (:issue:`#1930`, :issue:`#1988`, :issue:`#2141`,
-  :issue:`#2156`, :issue:`#2220`, :issue:`#2518`, :issue:`#2566`,
-  :issue:`#2573`, :issue:`#2577`, :issue:`#2857`, :issue:`#2924`,
-  :issue:`#2976`, :issue:`#3175`, :issue:`#3211`, :issue:`#3233`,
-  :issue:`#3308`, :issue:`#3338`, :issue:`#3417`, :issue:`#3439`,
-  :issue:`#3458`, :issue:`#3505`), among others:
-
-  - All QML is now loaded by ``QtQml.QQmlEngine``.
-  - Improve error reporting when determining the PyQt5 library location.
-  - Improved method for finding ``qt.conf``.
-  - Include OpenGL fallback DLLs for PyQt5. (:issue:`#3568`).
-  - Place PyQt5 DLLs in the correct location (:issue:`#3583`).
-* Fix hooks for cryptodome (:issue:`#3405`),
-  PySide2 (style mismatch) (:issue:`#3374`, :issue:`#3578`)
-* Fix missing SSL libraries on Windows with ``PyQt5.QtNetwork``. (:issue:`#3511`,
-  :issue:`#3520`)
-* Fix zmq on Windows Python 2.7. (:issue:`#2147`)
-* (GNU/Linux) Fix hook usb: Resolve library name reported by usb.backend.
-  (:issue:`#2633`, :issue:`#2831`, :issue:`#3269`)
-* Clean up the USB hook logic.
-
-
-Bootloader
-~~~~~~~~~~
-
-* Forward all signals to the child process if option
-  ``pyi-bootloader-ignore-signals`` to be set in the archive. (:issue:`#208`,
-  :issue:`#3515`)
-* Use ``waitpid`` instead of ``wait`` to avoid the bootloder parent process gets
-  signaled. (:issue:`#2966`)
-* (OS X) Don't make the application a GUI app by default, even in
-  ``--windowed`` mode. Not enforcing this programmatically in the bootloader
-  allows to control behavior using ``Info.plist`` options - which can by set in
-  PyInstaller itself or in the `.spec`-file. (:issue:`#1917`, :issue:`#2075`,
-  :issue:`#3566`)
-* (Windows) Show respectivly print utf-8 debug messages ungarbled.
-  (:issue:`#3477`)
-* Fix ``setenv()`` call when ``HAVE_UNSETENV`` is not defined. (:issue:`#3722`,
-  :issue:`#3723`)
+* Collect ``multimedia`` plugins that are required by ``QtMultimedia``
+  module starting with Qt6 v6.4.0. (:issue:`7352`)
+* Do not collect ``designer`` plugins as part of ``QtUiTools`` module in
+  ``PySide2`` and ``PySide6`` bindings. Instead, tie the collection of
+  plugins only to the ``QtDesigner`` module. (:issue:`7322`)
 
 
 Module Loader
 ~~~~~~~~~~~~~
 
-* Improved error message in case importing an extension module fails.
-  (:issue:`#3017`)
+* Remove deprecated ``PEP-302`` functionality from ``FrozenImporter``.
+  The ``find_module()`` and ``load_module()`` methods are deprecated
+  since python 3.4 in favor of ``PEP-451`` loader. (:issue:`7344`)
+
+
+5.7.0 (2022-12-04)
+------------------
+
+Features
+~~~~~~~~
+
+* Add the package's location and exact interpreter path to the error message
+  for
+  the check for obsolete and PyInstaller-incompatible standard library
+  back-port
+  packages (``enum34`` and ``typing``). (:issue:`7221`)
+* Allow controlling the build log level (:option:`--log-level`) via a
+  ``PYI_LOG_LEVEL`` environment variable. (:issue:`7235`)
+* Support building native ARM applications for Windows. If PyInstaller is ran
+  on
+  an ARM machine with an ARM build of Python, it will prodice an ARM
+  application. (:issue:`7257`)
+
+
+Bugfix
+~~~~~~
+
+* (Anaconda) Fix the ``PyInstaller.utils.hooks.conda.collect_dynamic_libs``
+  hook utility function to collect only dynamic libraries, by introducing
+  an additional type check (to exclude directories and symbolic links to
+  directories) and additional suffix check (to include only files whose
+  name matches the following patterns: ``*.dll``, ``*.dylib``, ``*.so``,
+  and ``*.so.*``). (:issue:`7248`)
+* (Anaconda) Fix the problem with Anaconda python 3.10 on linux and macOS,
+  where all content of the environment's ``lib`` directory would end up
+  collected as data  due to additional symbolic link pointing from
+  ``python3.1``
+  to ``python3.10``. (:issue:`7248`)
+* (GNU/Linux) Fixes an issue with gi shared libraries not being packaged if
+  they don't
+  have version suffix and are in a special location set by ``LD_LIBRARY_PATH``
+  instead of
+  a typical library path. (:issue:`7278`)
+* (Windows) Fix the problem with ``windowed`` frozen application being unable
+  to spawn interactive command prompt console via ``subprocess`` module due
+  to interference of the ``subprocess`` runtime hook with stream handles.
+  (:issue:`7118`)
+* (Windows) In ``windowed``/``noconsole`` mode, stop setting ``sys.stdout``
+  and ``sys.stderr`` to custom ``NullWriter`` object, and instead leave
+  them at ``None``. This matches the behavior of windowed python interpreter
+  (``pythonw.exe``) and prevents interoperability issues with code that
+  (rightfully) expects the streams to be either ``None`` or objects that
+  are fully compatible with ``io.IOBase``. (:issue:`3503`)
+* Ensure that ``PySide6.support.deprecated`` module is collected for
+  ``PySide6`` 6.4.0 and later in order to enable continued support for
+  ``|`` and ``&`` operators between Qt key and key modifier enum values
+  (e.g., ``QtCore.Qt.Key_D`` and ``QtCore.Qt.AltModifier``). (:issue:`7249`)
+* Fix potential duplication of python extension modules in ``onefile``
+  builds, which happened when an extension was collected both as an
+  ``EXTENSION`` and as a ``DATA`` (or a ``BINARY``) TOC type. This
+  resulted in run-time warnings about files already existing; the
+  most notorious example being ``WARNING: file already exists but
+  should not:
+  C:\Users\user\AppData\Local\Temp\MEI1234567\torch\_C.cp39-win_amd64.pyd``
+  when building ``onefile`` applications that use ``torch``. (:issue:`7273`)
+* Fix spurious attempt at reading the ``top_level.txt`` metadata from
+  packages installed in egg form. (:issue:`7086`)
+* Fix the log level (provided via :option:`--log-level`) being ignored by some
+  build steps. (:issue:`7235`)
+* Fix the problem with ``MERGE`` not properly cleaning up passed
+  ``Analysis.binaries`` and ``Analysis.datas`` TOCs due to changes made to
+  ``TOC`` class in PyInstaller 5.0. This effectively broke the supposed
+  de-duplication functionality of ``MERGE`` and multi-package bundles,
+  which should be restored now. (:issue:`7273`)
+* Prevent ``$pythonprefix/bin`` from being added to :data:`sys.path` when
+  PyInstaller is invoked using ``pyinstaller your-code.py`` but not using
+  ``python -m PyInstaller your-code.py``. This prevents collection mismatch
+  when
+  a library has the same name as console script. (:issue:`7120`)
+* Prevent isolated-subprocess calls from indefinitely blocking in their
+  clean-up codepath when the subprocess fails to exit. After the grace
+  period of 5 seconds, we now attempt to terminate such subprocess in
+  order to prevent hanging of the build process. (:issue:`7290`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (Windows) In ``windowed``/``noconsole`` mode, PyInstaller does not set
+  ``sys.stdout`` and ``sys.stderr`` to custom ``NullWriter`` object anymore,
+  but leaves them at ``None``. The new behavior matches that of the windowed
+  python interpreter (``pythonw.exe``), but may break the code that uses
+  ``sys.stdout`` or ``sys.stderr`` without first checking that they are
+  available. The code intended to be run frozen in ``windowed``/``noconsole``
+  mode should be therefore be validated using the windowed python interpreter
+  to catch errors related to console being unavailable. (:issue:`7216`)
+
+
+Deprecations
+~~~~~~~~~~~~
+
+* Deprecate bytecode encryption (the ``--key`` option), to be removed in
+  PyInstaller v6.0. (:issue:`6999`)
+
+
+Hooks
+~~~~~
+
+* (Windows) Remove the ``subprocess`` runtime hook. The problem with invalid
+  standard stream handles, which caused the ``subprocess`` module raise an
+  ``OSError: [WinError 6] The handle is invalid`` error in a ``windowed``
+  ``onefile`` frozen application when trying to spawn a subprocess without
+  redirecting all standard streams, has been fixed in the bootloader.
+  (:issue:`7182`)
+* Ensure that each ``Qt*`` submodule of the ``PySide2``, ``PyQt5``,
+  ``PySide6``,
+  and ``PyQt6`` bindings has a corresponding hook, and can therefore been
+  imported in a frozen application on its own. Applicable to the latest
+  versions of packages at the time of writing: ``PySide2 == 5.15.2.1``,
+  ``PyQt5 == 5.15.7``, ``PySide6 == 6.4.0``, and ``PyQt6 == 6.4.0``.
+  (:issue:`7284`)
+* Improve compatibility with contemporary ``Django`` 4.x version by removing
+  the override of ``django.core.management.get_commands`` from the ``Django``
+  run-time hook. The static command list override is both outdated (based on
+  ``Django`` 1.8) and unnecessary due to dynamic command list being properly
+  populated under contemporary versions of ``PyInstaller`` and ``Django``.
+  (:issue:`7259`)
+* Introduce additional log messages to ``matplotlib.backend`` hook to
+  provide better insight into what backends are selected and why when the
+  detection of ``matplotlib.use`` calls comes into effect. (:issue:`7300`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) In a ``onefile`` application, avoid passing invalid stream handles
+  (the ``INVALID_HANDLE_VALUE`` constant with value ``-1``) to the launched
+  application child process when the standard streams are unavailable (for
+  example, in a windowed/no-console application). (:issue:`7182`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* Support building ARM native binaries using MSVC using the command
+  ``python waf --target-arch=64bit-arm all``. If built on an ARM machine,
+  ``--target-arch=64bit-arm`` is the default. (:issue:`7257`)
+* Windows ARM64 bootloaders may now be built using an ARM build of clang with
+  ``python waf --target-arch=64bit-arm --clang all``. (:issue:`7257`)
+
+
+5.6.2 (2022-10-31)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (Linux, macOS) Fix the regression in shared library collection, where
+  the shared library would end up collected under its fully-versioned
+  .so name (e.g., ``libsomething.so.1.2.3``) instead of its originally
+  referenced name (e.g., ``libsomething.so.1``) due to accidental
+  symbolic link resolution. (:issue:`7189`)
+
+
+5.6.1 (2022-10-25)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (macOS) Fix regression in macOS app bundle signing caused by a typo made
+  in :issue:`7180`. (:issue:`7184`)
+
+
+5.6 (2022-10-23)
+-----------------
+
+Features
+~~~~~~~~
+
+* Add official support for Python 3.11. (Note that PyInstaller v5.5 is also
+  expected to work but has only been tested with a pre-release of Python 3.11.)
+  (:issue:`6783`)
+* Implement a new hook utility function,
+  :func:`~PyInstaller.utils.hooks.collect_delvewheel_libs_directory`,
+  intended for dealing with external shared library in ``delvewheel``-enabled
+  PyPI
+  wheels for Windows. (:issue:`7170`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Fix OpenCV (``cv2``) loader error in generated macOS .app
+  bundles, caused by the relocation of package's source .py files.
+  (:issue:`7180`)
+* (Windows) Improve compatibility with ``scipy`` 1.9.2, whose Windows wheels
+  switched to ``delvewheel``, and therefore have shared libraries located in
+  external .libs directory. (:issue:`7168`)
+
+* (Windows) Limit the DLL parent path preservation behavior from :issue:`7028`
+  to files collected from site-packages directories (as returned by
+  :func:`site.getsitepackages` and :func:`site.getusersitepackages`) instead of all
+  paths in :data:`sys.path`, to avoid unintended behavior in corner cases, such as
+  :data:`sys.path` containing the drive root or user's home directory.
+  (:issue:`7155`)
+
+* Fix compatibility with ``PySide6`` 6.4.0, where the deprecated
+  ``Qml2ImportsPath`` location key is not available anymore; use the
+  new ``QmlImportsPath`` key when it is available. (:issue:`7164`)
+* Prevent PyInstaller runtime hook for ``setuptools`` from attempting to
+  override ``distutils`` with ``setuptools``-provided version when
+  ``setuptools`` is collected and its version is lower than 60.0. This
+  both mimics the unfrozen behavior and prevents errors on versions
+  between 50.0 and 60.0, where we do not explicitly collect
+  ``setuptools._distutils``. (:issue:`7172`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (macOS) In generated macOS .app bundles, the collected source .py files
+  are not relocated from ``Contents/MacOS`` to ``Contents/Resources``
+  anymore, to avoid issues when the path to a .py file is supposed to
+  resolve to the same directory as adjacent binary extensions. On the
+  other hand, this change might result in regressions w.r.t. bundle
+  signing and/or notarization. (:issue:`7180`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Update the bundled ``zlib`` sources to v1.2.13. (:issue:`7166`)
+
+
+5.5 (2022-10-08)
+-----------------
+
+Features
+~~~~~~~~
+
+* (Windows) Support embedding multiple icons in the executable. (:issue:`7103`)
+
+
+Bugfix
+~~~~~~
+
+* (Windows) Fix a regression introduced in PyInstaller 5.4 (:issue:`#6925`),
+  where incorrect copy of ``python3.dll`` (and consequently an additional,
+  incorrect copy of ``python3X.dll`` from the same directory) is collected
+  when additional python installations are present in ``PATH``. (:issue:`7102`)
+* (Windows) Provide run-time override for ``ctypes.util.find_library`` that
+  searches ``sys._MEIPASS`` in addition to directories specified in ``PATH``.
+  (:issue:`7097`)
+* Fix the problem with ``pywin32`` DLLs not being found when importing
+  ``pywin32`` top-level extension modules, caused by the DLL directory
+  structure preservation behavior introduced in :issue:`7028`. Introduce
+  a new bootstrap/loader module that adds the ``pywin32_system32``
+  directory, if available, to both ``sys.path`` and the DLL search paths,
+  in lieu of having to provide a runtime hook script for every single
+  top-level extension module from ``pywin32``. (:issue:`7110`)
+
+
+Hooks
+~~~~~
+
+* Fix an error raised by the ``matplotlib.backends`` hook when trying to
+  specify the list of backends to collect via the hooks configuration.
+  (:issue:`7091`)
+
+
+5.4.1 (2022-09-11)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (Windows) Fix run-time error raised by ``pyi_rth_win32comgenpy``, the
+  run-time
+  hook for ``win32com``. (:issue:`7079`)
+
+
+5.4 (2022-09-10)
+-----------------
+
+Features
+~~~~~~~~
+
+* (Windows) When collecting a DLL that was discovered via link-time
+  dependency analysis of a collected binary/extension, attempt to preserve
+  its parent directory structure instead of collecting it into application's
+  top-level directory. This aims to preserve the parent directory structure
+  of DLLs bundled with python packages in PyPI wheels, while the DLLs
+  collected from system directories (as well as from ``Library\bin``
+  directory of the Anaconda's environment) are still collected into
+  top-level application directory. (:issue:`7028`)
+* Add support for ``setuptools``-provided ``distutils``, available since
+  ``setuptools >= 60.0``. (:issue:`7075`)
+* Implement a generic file filtering decision function for use in hooks,
+  based on the source filename and optional inclusion and exclusion pattern
+  list (:func:`PyInstaller.utils.hooks.include_or_exclude_file`).
+  (:issue:`7040`)
+* Rework the module exclusion mechanism. The excluded module entries,
+  specified via ``excludedimports`` list in the hooks, are now used to
+  suppress module imports from corresponding nodes *during modulegraph
+  construction*, rather than to remove the nodes from the graph as a
+  post-processing step. This should make the module exclusion more robust,
+  but the main benefit is that we avoid running (potentially many and
+  potentially costly) hooks for modules that would end up excluded anyway.
+  (:issue:`7066`)
+
+
+Bugfix
+~~~~~~
+
+* (Windows) Attempt to extend DLL search paths with directories found in
+  the `PATH` environment variable and by tracking calls to the
+  `os.add_dll_directory` function during import of the packages in
+  the isolated sub-process that performs the binary dependency scanning.
+  (:issue:`6924`)
+* (Windows) Ensure that ANGLE DLLs (``libEGL.dll`` and ``libGLESv2.dll``)
+  are collected when using Anaconda-installed ``PyQt5`` and ``Qt5``.
+  (:issue:`7029`)
+* Fix :class:`AssertionError` during build when analysing a ``.pyc`` file
+  containing more that 255 variable names followed by an import statement all
+  in
+  the same namespace. (:issue:`7055`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (Windows) PyInstaller now attempts to preserve parent directory structure
+  of DLLs that are collected from python packages (e.g., bundled with
+  packages in PyPI wheels) instead of collecting them to the top-level
+  application directory. This behavior might be incompatible with 3rd
+  party hooks that assume the old behavior, and may result in duplication
+  of DLL files or missing DLLs in hook-provided runtime search paths.
+  (:issue:`7028`)
+
+
+Hooks
+~~~~~
+
+* Implement new ``gstreamer`` hook configuration group with
+  ``include_plugins`` and ``exclude_plugins`` options that enable control
+  over GStreamer plugins collected by the ``gi.repository.Gst`` hook.
+  (:issue:`7040`)
+* Provide hooks for additional ``gstreamer`` modules provided via
+  GObject introspection (``gi``) bindings: ``gi.repository.GstAllocators``,
+  ``gi.repository.GstApp``, ``gi.repository.GstBadAudio``,
+  ``gi.repository.GstCheck``,
+  ``gi.repository.GstCodecs``, ``gi.repository.GstController``,
+  ``gi.repository.GstGL``,
+  ``gi.repository.GstGLEGL``, ``gi.repository.GstGLWayland``,
+  ``gi.repository.GstGLX11``,
+  ``gi.repository.GstInsertBin``, ``gi.repository.GstMpegts``,
+  ``gi.repository.GstNet``,
+  ``gi.repository.GstPlay``, ``gi.repository.GstPlayer``,
+  ``gi.repository.GstRtp``,
+  ``gi.repository.GstRtsp``, ``gi.repository.GstRtspServer``,
+  ``gi.repository.GstSdp``,
+  ``gi.repository.GstTranscoder``, ``gi.repository.GstVulkan``,
+  ``gi.repository.GstVulkanWayland``,
+  ``gi.repository.GstVulkanXCB``, and ``gi.repository.GstWebRTC``.
+  (:issue:`7074`)
+
+
+5.3 (2022-07-30)
+-----------------
+
+Features
+~~~~~~~~
+
+* (Windows) Implement handling of console control signals in the ``onefile``
+  bootloader parent process. The implemented handler suppresses the
+  ``CTRL_C_EVENT`` and ``CTRL_BREAK_EVENT`` to let the child process
+  deal with them as they see it fit. In the case of ``CTRL_CLOSE_EVENT``,
+  ``CTRL_LOGOFF_EVENT``, or ``CTRL_SHUTDOWN_EVENT``, the handler attempts
+  to delay the termination of the parent process in order to buy time for
+  the child process to exit and for the main thread of the parent process
+  to clean up the temporary directory before exiting itself. This should
+  prevent the temporary directory of a ``onefile`` frozen application
+  being left behind when the user closes the console window. (:issue:`6591`)
+* Implement a mechanism for controlling the collection mode of modules and
+  packages, with granularity ranging from top-level packages to individual
+  sub-modules. Therefore, the hooks can now specify whether the hooked
+  package should be collected as byte-compiled .pyc modules into embedded
+  PYZ archive (the default behavior), or as source .py files collected as
+  external data files (without corresponding modules in the PYZ archive).
+  (:issue:`6945`)
+
+
+Bugfix
+~~~~~~
+
+* (non-Windows) Avoid generating debug messages in POSIX signal handlers,
+  as the functions involved are generally not signal-safe. Should also
+  fix the endless spam of ``SIGPIPE`` that ocurrs under certain conditions
+  when shutting down the frozen application on linux. (:issue:`5270`)
+* (non-Windows) If the child process of a ``onefile`` frozen application
+  is terminated by a signal, delay re-raising of the signal in the parent
+  process until after the clean up has been performed. This prevents
+  ``onefile`` frozen applications from leaving behind their unpacked
+  temporary directories when either the parent or the child process is
+  sent the ``SIGTERM`` signal. (:issue:`2379`)
+* When building with ``noarchive=True`` (e.g., ``--debug noarchive`` or
+  ``--debug all``), PyInstaller no longer pollutes user-writable source
+  locations with its ``.pyc`` or ``.pyo`` files written next to the
+  corresponding source files. (:issue:`6591`)
+* When building with ``noarchive=True`` (e.g., ``--debug noarchive`` or
+  ``--debug all``), the source paths are now stripped from the collected
+  .pyc modules, same as if PYZ archive was used. (:issue:`6591`)
+
+
+Hooks
+~~~~~
+
+* Add PyGObject hook for ``gi.repository.freetype2``. Remove warning for
+  hidden import not found for gi._gobject with PyGObject 3.25.1+.
+  (:issue:`6951`)
+* Remove ``pkg_resources`` hidden imports that aren't available including
+  ``py2_warn``, ``markers``, and ``_vendor.pyparsing.diagram``. (:issue:`6952`)
 
 
 Documentation
 ~~~~~~~~~~~~~
 
-* Fix typos, smaller errors and formatting errors in documentation.
-  (:issue:`#3442`, :issue:`#3521`, :issue:`#3561`, :issue:`#3638`)
-* Make clear that ``--windowed`` is independent of ``--onedir``.
-  (:issue:`#3383`)
-* Mention imports using imports ``imp.find_module()`` are not detected.
-* Reflect actual behavior regarding ``LD_LIBRARY_PATH``. (:issue:`#3236`)
-* (OS X) Revise section on ``info_plist`` for ``plistlib`` functionality and
-  use an example more aligned with real world usage. (:issue:`#3532`,
-  :issue:`#3540`, :issue:`#3541`)
-* (developers) Overhaul guidelines for commit and commit-messages.
-  (:issue:`#3466`)
-* (developers) Rework developer’s quick-start guide.
+* Document the signal handling behavior Windows and various quirks related
+  to the frozen application shutdown via the Task Manager. (:issue:`6935`)
 
 
-Project & Process
-~~~~~~~~~~~~~~~~~
+5.2 (2022-07-08)
+-----------------
 
-* Add a pip ``requirements.txt`` file.
-* Let `pyup` update package requirements for “Test – Libraries” every month
-  only.
-* Use `towncrier` to manage the change log entries. (:issue:`#2756`,
-  :issue:`#2837`, :issue:`#3698`)
+Features
+~~~~~~~~
+
+* Detect if an icon file (``.ico`` or ``.icns``) is of another image type but
+  has been mislabelled as a native icon type via its file suffix then either
+  normalise to a genuinely native image type if ``pillow`` is installed or raise
+  an error. (:issue:`6870`)
+* Exit gracefully with an explanatory :class:`SystemExit` if the user moves or
+  deletes the application whilst it's still running. Note that this is only
+  detected on trying to load a module which has not already been loaded.
+  (:issue:`6856`)
+* Implement new standard hook variable, called
+  ``warn_on_missing_hiddenimports``. This optional boolean flag allows a hook to
+  opt out from warnings generated by missing hidden imports originating from
+  that hook. (:issue:`6914`)
+
+
+Bugfix
+~~~~~~
+
+* (Linux) Fix potential mismatch between the collected Python shared library
+  name and the name expected by the bootloader when using Anaconda environment.
+  The mismatch would occur on some attempts to freeze a program that uses an
+  extension that is also linked against the python shared library.
+  (:issue:`6831`)
+* (Linux) Fix the missing ``gi.repository`` error in an application frozen on
+  RHEL/Fedora linux with GObject introspection installed from the distribution's
+  RPM package. (:issue:`6780`)
+* (macOS) The ``QtWebEngine`` hook now makes ``QtOpenGL`` and ``QtDBus``
+  available to the renderer process with framework installs of Qt 6.
+  (:issue:`6892`)
+* (Windows) Optimize EXE PE headers fix-up process in an attempt to reduce the
+  processing time and the memory footprint with large onefile builds.
+  (:issue:`6874`)
+* Add a try/except guard around :func:`ctypes.util.find_library` to protect
+  against `CPython bug #93094 <https://github.com/python/cpython/issues/93094>`_
+  which leads to a :class:`FileNotFoundError`. (:issue:`6864`)
+* Fix regression in PyInstaller v5 where an import of a non-existent GObject
+  introspection (`gi`) module (for example, an optional dependency) in the
+  program causes a build-time error and aborts the build process.
+  (:issue:`6897`)
+* If passed a name of an importable module instead of a package, the
+  :func:`PyInstaller.utils.hooks.collect_submodules` function now returns
+  a list containing the module's name, same as it would for a package without
+  submodules. (:issue:`6850`)
+* Prevent :func:`PyInstaller.utils.hooks.collect_submodules` from recursing into
+  sub-packages that are excluded by the function passed via the ``filter``
+  argument. (:issue:`6846`)
+* The :func:`PyInstaller.utils.hooks.collect_submodules` function now excludes
+  un-importable subpackages from the returned modules list. (:issue:`6850`)
+
+
+Hooks
+~~~~~
+
+* (macOS) Disable ``QtWebEngine`` sandboxing for Qt6 in the corresponding
+  ``PySide6`` and ``PyQt6`` run-time hooks as a work-around for the
+  ``QtWebEngineProcess`` helper process crashing. This is required as of Qt
+  6.3.1 due to the way PyInstaller collects Qt libraries, but is applied
+  regardless of the used Qt6 version. If you are using an older version of Qt6
+  and would like to keep the sandboxing, reset the
+  ``QTWEBENGINE_DISABLE_SANDBOX`` environment variable at the start of your
+  program, before importing Qt packages. (:issue:`6903`)
+* Add support for GTK4 by adding dependencies and updating ``gi.repository.Gtk``
+  and ``gi.repository.Gdk`` to work with ``module-versions`` in hooksconfig for
+  ``gi``. (:issue:`6834`)
+* Refactor the GObject introspection (``gi``) hooks so that the processing is
+  performed only in hook loading stage or in the ``hook()`` function, but not in
+  the mixture of two. (:issue:`6901`)
+* Update the GObject introspection (``gi``) hooks to use newly-introduced
+  ``GiModuleInfo`` object to:
+
+   - Check for module availability.
+   - Perform typelib data collection; equivalent of old ``get_gi_typelibs``
+     function call.
+   - Obtain associated shared library path, equivalent of old ``get_gi_libdir``
+     function call.
+
+  The ``get_gi_typelibs`` and ``get_gi_libdir`` functions now internally
+  use ``GiModuleInfo`` to provide backwards-compatibility for external
+  users. (:issue:`6901`)
+
+
+5.1 (2022-05-17)
+-----------------
+
+Bugfix
+~~~~~~
+
+* (Windows) Fix the regression causing the (relative) spec path ending up
+  prepended to relative icon path twice, resulting in icon not being found.
+  (:issue:`6788`)
+* Prevent collection of an entire Python site when using
+  :func:`~PyInstaller.utils.hooks.collect_data_files` or
+  :func:`~PyInstaller.utils.hooks.collect_dynamic_libs` for single-file modules
+  (:issue:`6789`)
+* Prevent the hook utility functions, such as
+  :func:`~PyInstaller.utils.hooks.collect_submodules`,
+  :func:`~PyInstaller.utils.hooks.collect_data_files`, and
+  :func:`~PyInstaller.utils.hooks.collect_dynamic_libs`, from failing to
+  identify a package when its PEP451-compliant loader does not implement
+  the optional ``is_package`` method. (:issue:`6790`)
+* The :func:`~PyInstaller.utils.hooks.get_package_paths` function now
+  supports PEP420 namespace packages - although for backwards-compatibility
+  reasons, it returns only the first path when multiple paths are
+  present. (:issue:`6790`)
+* The hook utility functions
+  :func:`~PyInstaller.utils.hooks.collect_submodules`,
+  :func:`~PyInstaller.utils.hooks.collect_data_files`, and
+  :func:`~PyInstaller.utils.hooks.collect_dynamic_libs`) now support
+  collection from PEP420 namespace packages. (:issue:`6790`)
+* The user-provided spec file path and paths provided via :option:`--workpath`
+  and :option:`--distpath` are now resolved to absolute full paths before being
+  passed to PyInstaller's internals. (:issue:`6788`)
+
+
+Hooks
+~~~~~
+
+* Exclude ``doctest`` in the ``pickle`` hook. Update ``PySide2``, ``PySide6``,
+  ``PyQt5``, and ``PyQt6`` hooks with hidden imports that were previously
+  pulled in by ``doctest`` (that was in turn pulled in by ``pickle``).
+  (:issue:`6797`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Update the bundled ``zlib`` sources to v1.2.12. (:issue:`6804`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* Building on Windows with MSVC no longer falls to bits if the PyInstaller repo
+  is
+  stored in a directory with a long path. (:issue:`6806`)
+
+
+5.0.1 (2022-04-25)
+------------------
+
+Bugfix
+~~~~~~
+
+* (Linux) Have ``glib`` runtime hook prepend the frozen application's data
+  dir to the ``XDG_DATA_DIRS`` environment variable instead of completely
+  overwriting it. This should fix the case when ``xdg-open`` is used to
+  launch a system-installed application (for example, opening an URL in a
+  web browser via the ``webbrowser`` module) and no registered applications
+  being found. (:issue:`3668`)
+* Prevent unactionable errors raised by UPX from terminating the build.
+  (:issue:`6757`)
+* Restore the pre PyInstaller 5.0 behavior of resolving relative paths to icons
+  as
+  relative to the spec file rather than the current working directory.
+  (:issue:`6759`)
+* (Windows) Update system DLL inclusion list to allow collection of DLLs from
+  Visual Studio 2012 (VC11) runtime and Visual Studio 2013 (VC12) runtime,
+  as well as the latest version of Visual Studio 2015/2017/2019/2022 (VC14)
+  runtime (14.3). (:issue:`6778`)
+
+
+Hooks
+~~~~~
+
+* Refactor ``QtWebEngine`` hooks to support both pure Widget-based and
+  pure QML/Quick-based applications. (:issue:`6753`)
+* Update PySide6 and PyQt6 hooks for compatibility with Qt 6.3. ``QtWebEngine``
+  on Windows and Linux does not provide the ``qt.conf`` file for the helper
+  executable anymore, so we generate our own version of the file in order for
+  ``QtWebengine`` -based frozen applications to work. (:issue:`6769`)
+
+
+5.0 (2022-04-15)
+----------------
+
+Features
+~~~~~~~~
+
+* (macOS) App bundles built in ``onedir`` mode can now opt-in for :ref:`argv
+  emulation <macos event forwarding and argv emulation>` so that file paths
+  passed from the UI (`Open with...`) are reflected in :data:`sys.argv`.
+  (:issue:`5908`)
+* (macOS) App bundles built in ``onedir`` mode can now opt-in for :ref:`argv
+  emulation <macos event forwarding and argv emulation>` so that file paths
+  received in initial drag & drop event are reflected in :data:`sys.argv`.
+  (:issue:`5436`)
+* (macOS) The :ref:`argv emulation <macos event forwarding and argv emulation>`
+  functionality is now available as an optional feature for app bundles
+  built in either ``onefile`` or ``onedir`` mode. (:issue:`6089`)
+* (Windows) Embed the manifest into generated ``onedir`` executables by
+  default, in order to avoid potential issues when user renames the executable
+  (e.g., the manifest not being found anymore due to activation context
+  caching when user renames the executable and attempts to run it before
+  also renaming the manifest file). The old behavior of generating the
+  external manifest file in ``onedir`` mode can be re-enabled using the
+  :option:`--no-embed-manifest` command-line switch, or via the
+  ``embed_manifest=False`` argument to ``EXE()`` in the .spec file.
+  (:issue:`6223`)
+* (Wine) Prevent collection of Wine built-in DLLs (in either PE-converted or
+  fake/placeholder form) when building a Windows frozen application under
+  Wine. Display a warning for each excluded Wine built-in DLL. (:issue:`6149`)
+* Add a :mod:`PyInstaller.isolated` submodule as a safer replacement to
+  :func:`PyInstaller.utils.hooks.exec_statement`. (:issue:`6052`)
+* Improve matching of UPX exclude patterns to include OS-default case
+  sensitivity,
+  the wildcard operator (``*``), and support for parent directories in the
+  pattern.
+  Enables use of patterns like ``"Qt*.dll"`` and ``"PySide2*.pyd"``.
+  (:issue:`6161`)
+* Make the error handing of :func:`~PyInstaller.utils.hooks.collect_submodules`
+  configurable. (:issue:`6052`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Fix potential loss of Apple Events during ``onefile`` app bundle
+  start-up, when the child process is not yet ready to receive events
+  forwarded by the parent process. (:issue:`6089`)
+* (Windows) Remove the attempt to load the manifest of a ``onefile``
+  frozen executable via the activation context, which fails with *An
+  attempt to set the process default activation context failed because
+  the process default activation context was already set.* message that
+  can be observed in debug builds. This approach has been invalid ever
+  since :issue:`3746` implemented direct manifest embedding into the
+  ``onefile`` executable. (:issue:`6203`)
+* Fix an import leak when
+  :func:`PyInstaller.utils.hooks.get_module_file_attribute`
+  is called with a sub-module or a sub-package name. (:issue:`6169`)
+* Fix an import leak when :func:`PyInstaller.utils.hooks.is_package`
+  is called with a sub-module or a sub-package name. (:issue:`6169`)
+* Fix import errors when calling ``get_gi_libdir()`` during packaging of GTK
+  apps.
+  Enable CI tests of GTK by adding PyGObject dependencies for the Ubuntu
+  builds. (:issue:`6300`)
+* Issue an error report if a `.spec` file will not be generated, but
+  command-line options specific to that functionality are given.
+  (:issue:`6660`)
+* Prevent ``onefile`` cleanup from recursing into symlinked directories and
+  just remove the link instead. (:issue:`6074`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (macOS) App bundles built in ``onefile`` mode do not perform
+  :ref:`argv emulation <macos event forwarding and argv emulation>` by
+  default anymore. The functionality of converting initial open document/URL
+  events into ``sys.argv`` entries must now be explicitly opted-in,
+  via ``argv_emulation=True`` argument to ``EXE()`` in the .spec file
+  or via :option:`--argv-emulation` command-line flag. (:issue:`6089`)
+* (Windows) By default, manifest is now embedded into the executable in
+  ``onedir`` mode. The old behavior of generating the external manifest
+  file can be re-enabled using the :option:`--no-embed-manifest`
+  command-line switch, or via the ``embed_manifest=False`` argument to
+  ``EXE()`` in the .spec file. (:issue:`6223`)
+* Issue an error report if a `.spec` file will not be generated, but
+  command-line options specific to that functionality are given.
+  (:issue:`6660`)
+* The :func:`PyInstaller.utils.hooks.get_module_attribute` function now
+  returns the actual attribute value instead of its string representation.
+  The external users (e.g., 3rd party hooks) of this function must adjust
+  their handling of the return value accordingly. (:issue:`6169`)
+* The ``matplotlib.backends`` hook no longer collects all available
+  ``matplotlib`` backends, but rather tries to auto-detect the used
+  backend(s) by default. The old behavior can be re-enabled via the
+  :ref:`hook configuration option <matplotlib hook options>`. (:issue:`6024`)
+
+
+Hooks
+~~~~~
+
+* Rework the ``matplotlib.backends`` hook to attempt performing
+  auto-detection of the used backend(s) instead of collecting all
+  available backends. Implement :ref:`hook configuration option
+  <matplotlib hook options>` that allows users to switch between
+  this new behavior and the old behavior of collecting all backends,
+  or to manually specify the backend(s) to be collected. (:issue:`6024`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* Change the behaviour of the ``--no-universal2`` flag so that it now assumes
+  the
+  target architecture of the compiler (which may be overridden via the ``CC``
+  environment variable to facilitate cross compiling). (:issue:`6096`)
+* Refactor Apple Events handling code and move it into a separate source file.
+  (:issue:`6089`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Add a :ref:`new section <macos event forwarding and argv emulation>`
+  describing Apple Event forwarding behavior on macOS and the optional
+  `argv emulation` for macOS app bundles, along with its caveats.
+  (:issue:`6089`)
+* Update documentation on using ``UPX``. (:issue:`6161`)
 
 
 PyInstaller Core
 ~~~~~~~~~~~~~~~~
 
-* Add ``requirements_for_package()`` and ``collect_all()`` helper functions for
-  hooks.
-* Add a explanatory header to the warn-file, hopefully reducing the number of
-  those posting the file to the issue tracker.
-* Add module ``enum`` to base_library.zip, required for module ``re`` in
-  Python 3.6 (and ``re`` is required by ``warnings``).
-* Always write the `warn` file.
-* Apply ``format_binaries_and_datas()`` (which converts hook-style tuples into
-  ``TOC``-style tuples) to binaries and datas added through the hook api.
-* Avoid printing a useless exceptions in the ``get_module_file_attribute()``
-  helper function..
-* Don't gather Python extensions in ``collect_dynamic_libc()``.
-* Fix several ResourceWarnings and DeprecationWarnings (:issue:`#3677`)
-* Hint users to install necessary development packages if, in
-  ``format_binaries_and_datas()``, the file not found is ``pyconfig.h``.
-  (:issue:`#1539`, :issue:`#3348`)
-* Hook helper function ``is_module_satisfies()`` returns ``False`` for packages
-  not found. (:issue:`#3428`, :issue:`#3481`)
-* Read data for cache digest in chunks. (:issue:`#3281`)
-* Select correct file extension for C-extension file-names like
-  ``libzmq.cp36-win_amd64.pyd``.
-* State type of import (conditional, delayed, etc.) in the *warn* file again.
-* (modulegraph) Unbundle `altgraph` library, use from upstream.
-  (:issue:`#3058`)
-* (OS X) In ``--console`` mode set ``LSBackgroundOnly=True`` in``Info.plist`` to
-  hide the app-icon in the dock. This can still be overruled by passing
-  ``info_plist`` in the `.spec`-file. (:issue:`#1917`, :issue:`#3566`)
-* (OS X) Use the python standard library ``plistlib`` for generating the
-  ``Info.plist`` file. (:issue:`#3532`, :issue:`#3541`)
-* (Windows) Completely remove `pywin32` dependency, which has erratic releases
-  and the version on pypi may no longer have future releases. Require
-  `pywin32-ctypes` instead, which is pure python. (:issue:`#3141`)
-* (Windows) Encode manifest before updating resource. (:issue:`#3423`)
-* (Windows) Make import compatible with python.net, which uses an incompatible
-  signature for ``__import__``. (:issue:`#3574`)
+* Drop support for Python 3.6. (:issue:`6475`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* (Windows) Enable `Control Flow Guard
+  <https://docs.microsoft.com/en-us/windows/win32/secbp/control-flow-guard>`_
+  for the Windows bootloader. (:issue:`6136`)
+
+
+4.10 (2022-03-05)
+-----------------
+
+Features
+~~~~~~~~
+
+* (Wine) Prevent collection of Wine built-in DLLs (in either PE-converted or
+  fake/placeholder form) when building a Windows frozen application under
+  Wine. Display a warning for each excluded Wine built-in DLL. (:issue:`6622`)
+
+
+Bugfix
+~~~~~~
+
+* (Linux) Remove the timeout on ``objcopy`` operations to prevent wrongful
+  abortions when processing large executables on slow disks. (:issue:`6647`)
+* (macOS) Limit the strict architecture validation for collected binaries to
+  extension modules only. Fixes architecture validation errors when a
+  ``universal2`` package has its multi-arch extension modules' arch slices
+  linked against distinct single-arch thin shared libraries, as is the
+  case with ``scipy`` 1.8.0 macOS ``universal2`` wheel. (:issue:`6587`)
+* (macOS) Remove the 60 seconds timeout for each ``codesign`` and ``lipo``
+  operation which caused build abortion when
+  processing huge binaries. (:issue:`6644`)
+* (Windows) Use a made up (not ``.exe``) suffix for intermediate executable
+  files during the build process to prevent
+  antiviruses from attempting to scan the file whilst PyInstaller is still
+  working on it leading to a
+  :class:`PermissionError` at build time. (:issue:`6467`)
+* Fix an attempt to collect a non-existent ``.pyc`` file when the corresponding
+  source ``.py`` file has ``st_mtime`` set to zero. (:issue:`6625`)
+
+
+Hooks
+~~~~~
+
+* Add ``IPython`` to the list of excluded packages in the ``PIL`` hook in
+  order to prevent automatic collection of ``IPython`` when it is not
+  imported anywhere else. This in turn prevents whole ``matplotlib`` being
+  automatically pulled in when using  ``PIL.Image``. (:issue:`6605`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* Fix detection of 32-bit ``arm`` platform when Thumb instruction set is
+  enabled in the compiler. In this case, the ``ctx.env.DEST_CPU`` in
+  ``waf`` build script is set to ``thumb`` instead of ``arm``. (:issue:`6532`)
+
+
+4.9 (2022-02-03)
+----------------
+
+Bugfix
+~~~~~~
+
+* Add support for external paths when running ``pkgutil.iter_modules``.
+  Add support for multiple search paths to ``pkgutil.iter_modules``.
+  Correctly handle ``pkgutil.iter_modules`` with an empty list.
+  (:issue:`6529`)
+* Fix finding ``libpython3x.so`` when Python is installed with pyenv and the
+  python executable is not linked against ``libpython3x.so``. (:issue:`6542`)
+* Fix handling of symbolic links in the path matching part of the
+  PyInstaller's ``pkgutil.iter_modules`` replacement/override. (:issue:`6537`)
+
+
+Hooks
+~~~~~
+
+* Add hooks for ``PySide6.QtMultimedia`` and ``PyQt6.QtMultimedia``.
+  (:issue:`6489`)
+* Add hooks for ``QtMultimediaWidgets`` of all four supported Qt bindings
+  (``PySide2``, ``PySide6``, ``PyQt5``, and ``PySide6``). (:issue:`6489`)
+* Add support for ``setuptools 60.7.1`` and its vendoring  of ``jaraco.text``
+  in ``pkg_resources``. Exit with an error message if ``setuptools 60.7.0``
+  is encountered due to incompatibility with PyInstaller's loader logic.
+  (:issue:`6564`)
+* Collect the ``QtWaylandClient``-related plugins to enable Wayland support in
+  the
+  frozen applications using any of the four supported Qt bindings (``PySide2``,
+  ``PyQt5``, ``PySide6``, and ``PyQt6``). (:issue:`6483`)
+* Fix the issue with missing ``QtMultimediaWidgets`` module when using
+  ``PySide2.QtMultimedia`` or ``PySide6.QtMultimedia`` in combination
+  with PySide's ``true_property`` `feature
+  <https://doc.qt.io/qtforpython/feature-why.html#the-true-property-feature>`_.
+  (:issue:`6489`)
+
+
+4.8 (2022-01-06)
+----------------
+
+Features
+~~~~~~~~
+
+* (Windows) Set the executable's build time in PE header to the current
+  time. A custom timestamp can be specified via the ``SOURCE_DATE_EPOCH``
+  environment variable to allow reproducible builds. (:issue:`6469`)
+* Add strictly unofficial support for the `Termux
+  <https://f-droid.org/en/packages/com.termux/>`_ platform. (:issue:`6484`)
+* Replace the dual-process ``onedir`` mode on Linux and other Unix-like OSes
+  with a single-process implementation. This makes ``onedir`` mode on these
+  OSes comparable to Windows and macOS, where single-process ``onedir`` mode
+  has already been used for a while. (:issue:`6407`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Fix regression in generation of ``universal2`` executables that
+  caused the generated executable to fail ``codesign`` strict validation.
+  (:issue:`6381`)
+* (Windows) Fix ``onefile`` extraction behavior when the run-time temporary
+  directory is set to a drive letter. The application's temporary directory
+  is now created directly on the specified drive as opposed to the current
+  directory on the specified drive. (:issue:`6051`)
+* (Windows) Fix compatibility issues with python 3.9.8 from python.org, arising
+  from the lack of embedded manifest in the ``python.exe`` executable.
+  (:issue:`6367`)
+* (Windows) Fix stack overflow in `pyarmor`-protected frozen applications,
+  caused
+  by the executable's stack being smaller than that of the python interpreter.
+  (:issue:`6459`)
+* (Windows) Fix the ``python3.dll`` shared library not being found and
+  collected when using Python from MS App Store. (:issue:`6390`)
+* Fix a bug that prevented traceback from uncaught exception to be
+  retrieved and displayed in the windowed bootloader's error reporting
+  facility (uncaught exception dialog on Windows, syslog on macOS).
+  (:issue:`6426`)
+* Fix a crash when a onefile build attempts to overwrite an existing onedir
+  build
+  on macOS or Linux (:issue:`6418`)
+* Fix build errors when a linux shared library (.so) file is collected as
+  a binary on macOS. (:issue:`6327`)
+* Fix build errors when a Windows DLL/PYD file is collected as a binary on
+  a non-Windows OS. (:issue:`6327`)
+* Fix handling of encodings when reading the collected .py source files
+  via ``FrozenImporter.get_source()``. (:issue:`6143`)
+* Fix hook loader function not finding hooks if path has whitespaces.
+  (Re-apply the fix that has been inadvertedly undone during the
+  codebase reformatting.) (:issue:`6080`)
+* Windows: Prevent invalid handle errors when an application compiled in
+  :option:`--windowed` mode uses :mod:`subprocess`
+  without explicitly setting **stdin**, **stdout** and **stderr** to either
+  :data:`~subprocess.PIPE` or
+  :data:`~subprocess.DEVNULL`. (:issue:`6364`)
+
+
+Hooks
+~~~~~
+
+* (macOS) Add support for Anaconda-installed ``PyQtWebEngine``.
+  (:issue:`6373`)
+* Add hooks for ``PySide6.QtWebEngineWidgets`` and
+  ``PyQt6.QtWebEngineWidgets``.
+  The ``QtWebEngine`` support in PyInstaller requires ``Qt6`` v6.2.2 or later,
+  so if an earlier version is encountered, we exit with an error instead of
+  producing a defunct build. (:issue:`6387`)
+* Avoid collecting the whole ``QtQml`` module and its dependencies in cases
+  when it is not necessary (i.e., the application does not use ``QtQml`` or
+  ``QtQuick`` modules). The unnecessary collection was triggered due to
+  extension modules being linked against the ``libQt5Qml`` or ``libQt6Qml``
+  shared library, and affected pure widget-based applications (``PySide2``
+  and ``PySide6`` on Linux) and widget-based applications that use
+  ``QtWebEngineWidgets`` (``PySide2``, ``PySide6``, ``PyQt5``, and ``PyQt6``
+  on all OSes). (:issue:`6447`)
+* Update ``numpy`` hook for compatibility with version 1.22; the hook
+  cannot exclude ``distutils`` and ``numpy.distutils`` anymore, as they
+  are required by ``numpy.testing``, which is used by some external
+  packages, such as ``scipy``. (:issue:`6474`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Set the bootloader executable's stack size to 2 MB to match the
+  stack size of the python interpreter executable. (:issue:`6459`)
+* Implement single-process ``onedir`` mode for Linux and Unix-like OSes as a
+  replacement for previously-used two-process implementation. The new mode
+  uses ``exec()`` without ``fork()`` to restart the bootloader executable
+  image within the same process after setting up the environment (i.e., the
+  ``LD_LIBRARY_PATH`` and other environment variables). (:issue:`6407`)
+* Lock the PKG sideload mode in the bootloader unless the executable has a
+  special signature embedded. (:issue:`6470`)
+* When user script terminates with an uncaught exception, ensure that the
+  exception data obtained via ``PyErr_Fetch`` is normalized by also calling
+  ``PyErr_NormalizeException``. Otherwise, trying to format the traceback
+  via ``traceback.format_exception`` fails in some circumstances, and no
+  traceback can be displayed in the windowed bootloader's error report.
+  (:issue:`6426`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* The bootloader can be force compiled during pip install by setting the
+  environment variable ``PYINSTALLER_COMPILE_BOOTLOADER``. (:issue:`6384`)
+
+
+4.7 (2021-11-10)
+----------------
+
+Bugfix
+~~~~~~
+
+* Fix a bug since v4.6 where certain Unix system directories were incorrectly
+  assumed to exist and resulted in
+  a :class:`FileNotFoundError`. (:issue:`6331`)
+
+
+Hooks
+~~~~~
+
+* Update ``sphinx`` hook for compatibility with latest version (4.2.0).
+  (:issue:`6330`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Explicitly set ``NTDDI_VERSION=0x06010000`` and
+  ``_WIN32_WINNT=0x0601`` when compiling Windows bootloaders to request
+  Windows 7 feature level for Windows headers. The windowed bootloader
+  requires at least Windows Vista feature level, and some toolchains
+  (e.g., mingw cross-compiler on linux) set too low level by default.
+  (:issue:`6338`)
+* (Windows) Remove the check for the unused ``windres`` utility when compiling
+  with MinGW toolchain. (:issue:`6339`)
+* Replace use of ``PyRun_SimpleString`` with ``PyRun_SimpleStringFlags``.
+  (:issue:`6332`)
+
+
+4.6 (2021-10-29)
+-------------------------------
+
+Features
+~~~~~~~~
+
+* Add support for Python 3.10. (:issue:`5693`)
+
+* (Windows) Embed the manifest into generated ``onedir`` executables by
+  default, in order to avoid potential issues when user renames the executable
+  (e.g., the manifest not being found anymore due to activation context
+  caching when user renames the executable and attempts to run it before
+  also renaming the manifest file). The old behavior of generating the
+  external manifest file in ``onedir`` mode can be re-enabled using the
+  :option:`--no-embed-manifest` command-line switch, or via the
+  ``embed_manifest=False`` argument to ``EXE()`` in the .spec file.
+  (:issue:`6248`)
+* (Windows) Respect :pep:`239` encoding specifiers in Window's VSVersionInfo
+  files. (:issue:`6259`)
+* Implement basic resource reader for accessing on-filesystem resources (data
+  files)
+  via ``importlib.resources`` (python >= 3.9) or ``importlib_resources``
+  (python <= 3.8). (:issue:`5616`)
+* Ship precompiled wheels for musl-based Linux distributions (such as Alpine or
+  OpenWRT) on ``x86_64`` and ``aarch64``. (:issue:`6245`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Ensure that executable pre-processing and post-processing steps
+  (target arch selection, SDK version adjustment, (re)signing) are applied in
+  the stand-alone PKG mode. (:issue:`6251`)
+* (macOS) Robustify the macOS assembly pipeline to work around the issues with
+  the ``codesign`` utility on macOS 10.13 High Sierra. (:issue:`6167`)
+* (Windows) Fix collection of ``sysconfig`` platform-specific data module when
+  using MSYS2/MINGW python. (:issue:`6118`)
+* (Windows) Fix displayed script name and exception message in the
+  unhandled exception dialog (windowed mode) when bootloader is compiled
+  using the ``MinGW-w64`` toolchain. (:issue:`6199`)
+* (Windows) Fix issues in ``onedir`` frozen applications when the bootloader
+  is compiled using a toolchain that forcibly embeds a default manifest
+  (e.g., the ``MinGW-w64`` toolchain from ``msys2``). The issues range from
+  manifest-related options (e.g., ``uac-admin``) not working to windowed frozen
+  application not starting at all (with the ``The procedure entry point
+  LoadIconMetric could not be located...`` error message). (:issue:`6196`)
+* (Windows) Fix the declared length of strings in the optional embedded
+  product version information resource structure. The declared lengths
+  were twice too long, and resulted in trailing garbage characters when
+  the version information was read using `ctypes` and winver API.
+  (:issue:`6219`)
+* (Windows) Remove the attempt to load the manifest of a ``onefile``
+  frozen executable via the activation context, which fails with ``An
+  attempt to set the process default activation context failed because
+  the process default activation context was already set.`` message that
+  can be observed in debug builds. This approach has been invalid ever
+  since :issue:`3746` implemented direct manifest embedding into the
+  ``onefile`` executable. (:issue:`6248`)
+* (Windows) Suppress missing library warnings for ``api-ms-win-core-*`` DLLs.
+  (:issue:`6201`)
+* (Windows) Tolerate reading Windows VSVersionInfo files with unicode byte
+  order
+  marks. (:issue:`6259`)
+* Fix ``sys.executable`` pointing to the external package file instead of
+  the executable when in package side-load mode (``pkg_append=False``).
+  (:issue:`6202`)
+* Fix a runaway glob which caused ``ctypes.util.find_library("libfoo")`` to
+  non-deterministically pick any library
+  matching ``libfoo*`` to bundle instead of ``libfoo.so``. (:issue:`6245`)
+* Fix compatibility with with MIPS and loongarch64 architectures.
+  (:issue:`6306`)
+* Fix the ``FrozenImporter.get_source()`` to correctly handle the packages'
+  ``__init__.py`` source  files. This in turn fixes missing-source-file
+  errors for packages that use ``pytorch`` JIT when the source .py files
+  are collected and available (for example, ``kornia``). (:issue:`6237`)
+* Fix the location of the generated stand-alone pkg file when using the
+  side-load mode (``pkg_append=False``) in combination with ``onefile`` mode.
+  The package file is now placed next to the executable instead of next to
+  the .spec file. (:issue:`6202`)
+* When generating spec files, avoid hard-coding the spec file's location as the
+  ``pathex`` argument to the ``Analysis``. (:issue:`6254`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (Windows) By default, manifest is now embedded into the executable in
+  ``onedir`` mode. The old behavior of generating the external manifest
+  file can be re-enabled using the :option:`--no-embed-manifest`
+  command-line switch, or via the ``embed_manifest=False`` argument to
+  ``EXE()`` in the .spec file. (:issue:`6248`)
+
+
+Hooks
+~~~~~
+
+* (macOS) Fix compatibility with Anaconda ``PyQt5`` package. (:issue:`6181`)
+* Add a hook for ``pandas.plotting`` to restore compatibility with ``pandas``
+  1.3.0
+  and later. (:issue:`5994`)
+* Add a hook for ``QtOpenGLWidgets`` for ``PyQt6`` and ``PySide6`` to collect
+  the new ``QtOpenGLWidgets`` module introduced in Qt6 (:issue:`6310`)
+* Add hooks for ``QtPositioning`` and ``QtLocation`` modules of the Qt5-based
+  packages (``PySide2`` and ``PyQt5``) to ensure that corresponding plugins
+  are collected. (:issue:`6250`)
+* Fix compatibility with ``PyQt5`` 5.9.2 from conda's  main channel.
+  (:issue:`6114`)
+* Prevent potential error in hooks for Qt-based packages that could be
+  triggered
+  by a partial ``PyQt6`` installation. (:issue:`6141`)
+* Update ``QtNetwork`` hook for ``PyQt6`` and ``PySide6``  to collect the
+  new ``tls`` plugins that were introduced in Qt 6.2. (:issue:`6276`)
+* Update the ``gi.repository.GtkSource`` hook to accept a module-versions
+  hooksconfig dict in order to allow the hook to be used with GtkSource
+  versions
+  greater than 3.0. (:issue:`6267`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Suppress two ``snprintf`` truncation warnings that prevented
+  bootloader from building with ``winlibs MinGW-w64`` toolchain.
+  (:issue:`6196`)
+* Update the Linux bootloader cross compiler Dockerfile to allow using `the
+  official PyPA base images
+  <https://quay.io/organization/pypa/>`_ in place of the dockcross ones.
+  (:issue:`6245`)
+
+
+4.5.1 (2021-08-06)
+------------------
+
+Bugfix
+~~~~~~
+
+* Fix hook loader function not finding hooks if path has whitespaces.
+  (:issue:`6080`)
+
+
+4.5 (2021-08-01)
+----------------
+
+Features
+~~~~~~~~
+
+* (POSIX) Add ``exclude_system_libraries`` function to the Analysis class
+  for .spec files,
+  to exclude most or all non-Python system libraries from the bundle.
+  Documented in new :ref:`POSIX Specific Options` section. (:issue:`6022`)
+
+
+Bugfix
+~~~~~~
+
+* (Cygwin) Add ``_MEIPASS`` to DLL search path to fix loading of python shared
+  library in onefile builds made in cygwin environment and executed outside of
+  it. (:issue:`6000`)
+* (Linux) Display missing library warnings for "not found" lines in ``ldd``
+  output (i.e., ``libsomething.so => not found``) instead of quietly
+  ignoring them. (:issue:`6015`)
+* (Linux) Fix spurious missing library warning when ``libc.so`` points to
+  ``ldd``. (:issue:`6015`)
+* (macOS) Fix python shared library detection for non-framework python builds
+  when the library  path cannot be inferred from imports of the ``python``
+  executable. (:issue:`6021`)
+* (macOS) Fix the crashes in ``onedir`` bundles of ``tkinter``-based
+  applications
+  created using Homebrew python 3.9 and Tcl/Tk 8.6.11. (:issue:`6043`)
+* (macOS) When fixing executable for codesigning, update the value of
+  ``vmsize`` field in the ``__LINKEDIT`` segment. (:issue:`6039`)
+* Downgrade messages about missing dynamic link libraries from ERROR to
+  WARNING. (:issue:`6015`)
+* Fix a bytecode parsing bug which caused tuple index errors whilst scanning
+  modules which use :mod:`ctypes`. (:issue:`6007`)
+* Fix an error when rhtooks for ``pkgutil`` and ``pkg_resources`` are used
+  together. (:issue:`6018`)
+* Fix architecture detection on Apple M1 (:issue:`6029`)
+* Fix crash in windowed bootloader when the traceback for unhandled exception
+  cannot be retrieved. (:issue:`6070`)
+* Improve handling of errors when loading hook entry-points. (:issue:`6028`)
+* Suppress missing library warning for ``shiboken2`` (``PySide2``) and
+  ``shiboken6`` (``PySide6``) shared library. (:issue:`6015`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* (macOS) Disable processing of Apple events for the purpose of argv emulation
+  in ``onedir`` application bundles. This functionality was introduced in
+  PyInstaller 4.4 by (:issue:`5920`) in response to feature requests
+  (:issue:`5436`) and (:issue:`5908`), but was discovered to be breaking
+  ``tkinter``-based ``onedir`` bundles made with Homebrew python 3.9 and
+  Tcl/Tk 8.6.11 (:issue:`6043`). As such, until the cause is investigated
+  and the issue addressed, this feature is reverted/disabled. (:issue:`6048`)
+
+
+Hooks
+~~~~~
+
+* Add a hook for ``pandas.io.formats.style`` to deal with indirect import of
+  ``jinja2`` and the missing template file. (:issue:`6010`)
+* Simplify the ``PySide2.QWebEngineWidgets`` and ``PyQt5.QWebEngineWidgets`` by
+  merging most of their code into a common helper function. (:issue:`6020`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Add a page describing hook configuration mechanism and the currently
+  implemented options. (:issue:`6025`)
+
+
+PyInstaller Core
+~~~~~~~~~~~~~~~~
+
+* Isolate discovery of 3rd-party hook directories into a separate
+  subprocess to avoid importing packages in the main process. (:issue:`6032`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* Allow statically linking zlib on non-Windows specified via either a
+  ``--static-zlib`` flag or a ``PYI_STATIC_ZLIB=1`` environment variable.
+  (:issue:`6010`)
+
+
+4.4 (2021-07-13)
+----------------
+
+Features
+~~~~~~~~
+
+* (macOS) Implement signing of .app bundle (ad-hoc or with actual signing
+  identity, if provided). (:issue:`5581`)
+* (macOS) Implement support for Apple Silicon M1 (``arm64``) platform
+  and different targets for frozen applications (thin-binary ``x86_64``,
+  thin-binary ``arm64``, and fat-binary ``universal2``), with build-time
+  arch validation and ad-hoc resigning of all collected binaries.
+  (:issue:`5581`)
+* (macOS) In ``onedir`` ``windowed`` (.app bundle) mode, perform an
+  interaction of Apple event processing to convert ``odoc`` and ``GURL``
+  events to ``sys.argv`` before entering frozen python script. (:issue:`5920`)
+* (macOS) In windowed (.app bundle) mode, always log unhandled exception
+  information to ``syslog``, regardless of debug mode. (:issue:`5890`)
+* (Windows) Add support for Python from Microsoft App Store. (:issue:`5816`)
+* (Windows) Implement a custom dialog for displaying information about
+  unhandled
+  exception and its traceback when running in windowed/noconsole mode.
+  (:issue:`5890`)
+* Add **recursive** option to :func:`PyInstaller.utils.hooks.copy_metadata()`.
+  (:issue:`5830`)
+* Add ``--codesign-identity``  command-line switch to perform code-signing
+  with actual signing identity instead of ad-hoc signing (macOS only).
+  (:issue:`5581`)
+* Add ``--osx-entitlements-file`` command-line switch that specifies optional
+  entitlements file to be used during code signing of collected binaries
+  (macOS only). (:issue:`5581`)
+* Add ``--target-arch`` command-line switch to select target architecture
+  for frozen application (macOS only). (:issue:`5581`)
+* Add a splash screen that displays a background image and text:
+  The splash screen can be controlled from within Python using the
+  ``pyi_splash`` module.
+  A splash screen can be added using the ``--splash IMAGE_FILE`` option.
+  If optional text is enabled, the splash screen will show the progress of
+  unpacking in
+  onefile mode.
+  This feature is supported only on Windows and Linux.
+  A huge thanks to `@Chrisg2000 <https://github.com/Chrisg2000>`_ for
+  programming this feature. (:issue:`4354`, :issue:`4887`)
+* Add hooks for ``PyQt6``. (:issue:`5865`)
+* Add hooks for ``PySide6``. (:issue:`5865`)
+* Add option to opt-out from reporting full traceback for unhandled exceptions
+  in windowed mode (Windows and macOS only), via
+  ``--disable-windowed-traceback``
+  PyInstaller CLI switch and the corresponding ``disable_windowed_traceback``
+  boolean argument to ``EXE()`` in spec file. (:issue:`5890`)
+* Allow specify which icon set, themes and locales
+  to pack with Gtk applications.
+  Pass a keyword arg ``hooksconfig`` to
+  Analysis.
+
+  .. code-block:: python
+
+      a = Analysis(["my-gtk-app.py"],
+                   ...,
+                   hooksconfig={
+                       "gi": {
+                           "icons": ["Adwaita"],
+                           "themes": ["Adwaita"],
+                           "languages": ["en_GB", "zh_CN"]
+                       }
+                   },
+                   ...)
+
+  (:issue:`5853`)
+* Automatically exclude Qt plugins from UPX processing. (:issue:`4178`)
+* Collect distribution metadata automatically.
+  This works by scanning collected Python files for uses of:
+
+  * ``pkg_resources.get_distribution()``
+  * ``pkg_resources.require()``
+  * ``importlib.metadata.distribution()``
+  * ``importlib.metadata.metadata()``
+  * ``importlib.metadata.files()``
+  * ``importlib.metadata.version()``
+
+  In all cases, the metadata will only be collected if the distribution name is
+  given as a plain string literal. Anything more complex will still require a
+  hook containing :func:`PyInstaller.utils.hooks.copy_metadata`.
+  (:issue:`5830`)
+* Implement support for :func:`pkgutil.iter_modules`. (:issue:`1905`)
+* Windows: Provide a meaningful error message if given an icon in an
+  unsupported
+  Image format. (:issue:`5755`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) App bundles built in ``onedir`` mode now filter out ``-psnxxx``
+  command-line argument from ``sys.argv``, to keep behavior consistent
+  with bundles built in ``onefile`` mode. (:issue:`5920`)
+* (macOS) Ensure that the macOS SDK version reported by the frozen application
+  corresponds to the minimum of the SDK version used to build the bootloader
+  and the SDK version used to build the Python library. Having the application
+  report more recent version than Python library and other bundled libraries
+  may result in macOS attempting to enable additional features that are not
+  available in the Python library, which may in turn cause inconsistent
+  behavior
+  and UI issues with ``tkinter``. (:issue:`5839`)
+* (macOS) Remove spurious ``MacOS/`` prefix from ``CFBundleExecutable``
+  property
+  in the generated ``Info.plist`` when building an app bundle. (:issue:`4413`,
+  :issue:`5442`)
+* (macOS) The drag & drop file paths passed to app bundles built in
+  ``onedir`` mode are now reflected in ``sys.argv``. (:issue:`5436`)
+* (macOS) The file paths passed from the UI (`Open with...`) to app bundles
+  built in ``onedir`` mode are now reflected in ``sys.argv``. (:issue:`5908`)
+* (macOS) Work around the ``tkinter`` UI issues due to problems with
+  dark mode activation: black ``Tk`` window with macOS Intel installers
+  from ``python.org``, or white text on bright background with Anaconda
+  python. (:issue:`5827`)
+* (Windows) Enable collection of additional VC runtime DLLs (``msvcp140.dll``,
+  ``msvcp140_1.dll``, ``msvcp140_2.dll``, and ``vcruntime140_1.dll``), to
+  allow frozen applications to run on Windows systems that do not have
+  `Visual Studio 2015/2017/2019 Redistributable` installed. (:issue:`5770`)
+* Enable retrieval of code object for ``__main__`` module via its associated
+  loader (i.e., ``FrozenImporter``). (:issue:`5897`)
+* Fix :func:`inspect.getmodule` failing to resolve module from stack-frame
+  obtained via :func:`inspect.stack`. (:issue:`5963`)
+* Fix ``__main__`` module being recognized as built-in instead of module.
+  (:issue:`5897`)
+* Fix a bug in :ref:`ctypes dependency scanning <Ctypes Dependencies>` which
+  caused references to be missed if the preceding code contains more than
+  256 names or 256 literals. (:issue:`5830`)
+* Fix collection of duplicated ``_struct`` and ``zlib`` extension modules
+  with mangled filenames. (:issue:`5851`)
+* Fix python library lookup when building with RH SCL python 3.8 or later.
+  (:issue:`5749`)
+* Prevent :func:`PyInstaller.utils.hooks.copy_metadata` from renaming
+  ``[...].dist-info`` metadata folders to ``[...].egg-info`` which breaks usage
+  of ``pkg_resources.requires()`` with *extras*. (:issue:`5774`)
+* Prevent a bootloader executable without an embedded CArchive from being
+  misidentified as having one, which leads to undefined behavior in frozen
+  applications with side-loaded CArchive packages. (:issue:`5762`)
+* Prevent the use of ``sys`` or ``os`` as variables in the global namespace
+  in frozen script from affecting the ``ctypes`` hooks thar are installed
+  during bootstrap. (:issue:`5797`)
+* Windows: Fix EXE being rebuilt when there are no changes. (:issue:`5921`)
+
+
+Hooks
+~~~~~
+
+* * Add ``PostGraphAPI.analysis`` attribute.
+    Hooks can access the ``Analysis`` object
+    through the ``hook()`` function.
+
+  * Hooks may access a ``Analysis.hooksconfig`` attribute
+    assigned on ``Analysis`` construction.
+
+    A helper function :func:`~PyInstaller.utils.hooks.get_hook_config`
+    was defined in ``utils.hooks`` to get the config. (:issue:`5853`)
+* Add support for ``PyQt5`` 5.15.4. (:issue:`5631`)
+* Do not exclude ``setuptools.py27compat`` and ``setuptools.py33compat``
+  as they are required by other ``setuptools`` modules. (:issue:`5979`)
+* Switch the library search order in ``ctypes`` hooks: first check whether
+  the given name exists as-is, before trying to search for its basename in
+  ``sys._MEIPASS`` (instead of the other way around). (:issue:`5907`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (macOS) Build bootloader as ``universal2`` binary by default (can
+  be disabled by passing ``--no-universal2`` to waf). (:issue:`5581`)
+* Add Tcl/Tk based Splash screen, which is controlled from
+  within Python. The necessary module to create the Splash
+  screen in PyInstaller is under :mod:`Splash` available.
+  A huge thanks to `@Chrisg2000 <https://github.com/Chrisg2000>`_ for
+  programming this feature. (:issue:`4887`)
+* Provide a Dockerfile to build Linux bootloaders for different architectures.
+  (:issue:`5995`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Document the new macOS multi-arch support and code-signing behavior
+  in corresponding sub-sections of ``Notes about specific Features``.
+  (:issue:`5581`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* Update ``clang`` in ``linux64`` Vagrant VM to ``clang-11`` from
+  ``apt.llvm.org`` so it can build ``universal2`` macOS bootloader.
+  (:issue:`5581`)
+* Update ``crossosx`` Vagrant VM to build the toolchain from ``Command Line
+  Tools for Xcode`` instead of full ``Xcode package``. (:issue:`5581`)
+
+
+4.3 (2021-04-16)
+----------------
+
+Features
+~~~~~~~~
+
+* Provide basic implementation for ``FrozenImporter.get_source()`` that
+  allows reading source from ``.py`` files that are collected by hooks as
+  data files. (:issue:`5697`)
+* Raise the maximum allowed size of ``CArchive`` (and consequently ``onefile``
+  executables) from 2 GiB to 4 GiB. (:issue:`3939`)
+* The `unbuffered stdio` mode (the ``u`` option) now sets the
+  ``Py_UnbufferedStdioFlag``
+  flag to enable unbuffered stdio mode in Python library. (:issue:`1441`)
+* Windows: Set EXE checksums. Reduces false-positive detection from antiviral
+  software. (:issue:`5579`)
+* Add new command-line options that map to collect functions from hookutils:
+  ``--collect-submodules``, ``--collect-data``, ``--collect-binaries``,
+  ``--collect-all``, and ``--copy-metadata``. (:issue:`5391`)
+* Add new hook utility :func:`~PyInstaller.utils.hooks.collect_entry_point` for
+  collecting plugins defined through setuptools entry points. (:issue:`5734`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Fix ``Bad CPU type in executable`` error in helper-spawned python
+  processes when running under ``arm64``-only flavor of Python on Apple M1.
+  (:issue:`5640`)
+* (OSX) Suppress missing library error messages for system libraries as
+  those are never collected by PyInstaller and starting with Big Sur,
+  they are hidden by the OS. (:issue:`5107`)
+* (Windows) Change default cache directory to ``LOCALAPPDATA``
+  (from the original ``APPDATA``).
+  This is to make sure that cached data
+  doesn't get synced with the roaming profile.
+  For this and future versions ``AppData\Roaming\pyinstaller``
+  might be safely deleted. (:issue:`5537`)
+* (Windows) Fix ``onefile`` builds not having manifest embedded when icon is
+  disabled via ``--icon NONE``. (:issue:`5625`)
+* (Windows) Fix the frozen program crashing immediately with
+  ``Failed to execute script pyiboot01_bootstrap`` message when built in
+  ``noconsole`` mode and with import logging enabled (either via
+  ``--debug imports`` or ``--debug all`` command-line switch). (:issue:`4213`)
+* ``CArchiveReader`` now performs full back-to-front file search for
+  ``MAGIC``, allowing ``pyi-archive_viewer`` to open binaries with extra
+  appended data after embedded package (e.g., digital signature).
+  (:issue:`2372`)
+* Fix ``MERGE()`` to properly set references to nested resources with their
+  full shared-package-relative path instead of just basename. (:issue:`5606`)
+* Fix ``onefile`` builds failing to extract files when the full target
+  path exceeds 260 characters. (:issue:`5617`)
+* Fix a crash in ``pyi-archive_viewer`` when quitting the application or
+  moving up a level. (:issue:`5554`)
+* Fix extraction of nested files in ``onefile`` builds created in MSYS
+  environments. (:issue:`5569`)
+* Fix installation issues stemming from unicode characters in
+  file paths. (:issue:`5678`)
+* Fix the build-time error under python 3.7 and earlier when ``ctypes``
+  is manually added to ``hiddenimports``. (:issue:`3825`)
+* Fix the return code if the frozen script fails due to unhandled exception.
+  The return code 1 is used instead of -1, to keep the behavior consistent
+  with that of the python interpreter. (:issue:`5480`)
+* Linux: Fix binary dependency scanner to support `changes to ldconfig
+  <https://sourceware.org/git/?p=glibc.git;a=commitdiff;h=dfb3f101c5ef23adf60d389058a2b33e23303d04>`_
+  introduced in ``glibc`` 2.33. (:issue:`5540`)
+* Prevent ``MERGE`` (multipackage) from creating self-references for
+  duplicated TOC entries. (:issue:`5652`)
+* PyInstaller-frozen onefile programs are now compatible with ``staticx``
+  even if the bootloader is built as position-independent executable (PIE).
+  (:issue:`5330`)
+* Remove dependence on a `private function
+  <https://github.com/matplotlib/matplotlib/commit/e1352c71f07aee7eab004b73dd9bda2a260ab31b>`_
+  removed in ``matplotlib`` 3.4.0rc1. (:issue:`5568`)
+* Strip absolute paths from ``.pyc`` modules collected into
+  ``base_library.zip``
+  to enable reproducible builds that are invariant to Python install location.
+  (:issue:`5563`)
+* (OSX) Fix issues with ``pycryptodomex`` on macOS. (:issue:`5583`)
+* Allow compiled modules to be collected into ``base_library.zip``.
+  (:issue:`5730`)
+* Fix a build error triggered by scanning ``ctypes.CDLL('libc.so')`` on certain
+  Linux C compiler combinations. (:issue:`5734`)
+* Improve performance and reduce stack usage of module scanning.
+  (:issue:`5698`)
+
+
+Hooks
+~~~~~
+
+* Add support for Conda Forge's distribution of ``NumPy``. (:issue:`5168`)
+* Add support for package content listing via ``pkg_resources``. The
+  implementation enables querying/listing resources in a frozen package
+  (both PYZ-embedded and on-filesystem, in that order of precedence) via
+  ``pkg_resources.resource_exists()``, ``resource_isdir()``, and
+  ``resource_listdir()``. (:issue:`5284`)
+* Hooks: Import correct typelib for GtkosxApplication. (:issue:`5475`)
+* Prevent ``matplotlib`` hook from collecting current working directory when it
+  fails to determine the path to matplotlib's data directory. (:issue:`5629`)
+* Update ``pandas`` hook for compatibility with version 1.2.0 and later.
+  (:issue:`5630`)
+* Update hook for ``distutils.sysconfig`` to be compatible with
+  pyenv-virtualenv. (:issue:`5218`)
+* Update hook for ``sqlalchemy`` to support version 1.4.0 and above.
+  (:issue:`5679`)
+* Update hook for ``sysconfig`` to be compatible with pyenv-virtualenv.
+  (:issue:`5018`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* Implement full back-to-front file search for the embedded archive.
+  (:issue:`5511`)
+* Perform file extraction from the embedded archive in a streaming manner
+  in order to limit memory footprint when archive contains large files.
+  (:issue:`5551`)
+* Set the ``__file__`` attribute in the ``__main__`` module (entry-point
+  script) to the absolute file name inside the ``_MEIPASS``. (:issue:`5649`)
+* Enable cross compiling for FreeBSD from Linux. (:issue:`5733`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Doc: Add version spec file option for macOS Bundle. (:issue:`5476`)
+* Update the ``Run-time Information`` section to reflect the changes in
+  behavior of ``__file__`` inside the ``__main__`` module. (:issue:`5649`)
+
+
+PyInstaller Core
+~~~~~~~~~~~~~~~~
+
+* Drop support for python 3.5; EOL since September 2020. (:issue:`5439`)
+* Collect python extension modules that correspond to built-ins into
+  ``lib-dynload`` sub-directory instead of directly into bundle's root
+  directory. This prevents them from shadowing shared libraries with the
+  same basename that are located in a package and loaded via ``ctypes`` or
+  ``cffi``, and also declutters the bundle's root directory. (:issue:`5604`)
+
+Breaking
+~~~~~~~~
+
+* No longer collect ``pyconfig.h`` and ``makefile`` for :mod:`sysconfig`. Instead
+  of :func:`~sysconfig.get_config_h_filename` and
+  :func:`~sysconfig.get_makefile_filename`, you should use
+  :func:`~sysconfig.get_config_vars` which no longer depends on those files. (:issue:`5218`)
+* The ``__file__`` attribute in the ``__main__`` module (entry-point
+  script) is now set to the absolute file name inside the ``_MEIPASS``
+  (as if script file existed there) instead of just script filename.
+  This better matches the behavior of ``__file__`` in the unfrozen script,
+  but might break the existing code that explicitly relies on the old
+  frozen behavior. (:issue:`5649`)
+
+
+
+4.2 (2021-01-13)
+----------------
+
+Features
+~~~~~~~~
+
+* Add hooks utilities to find binary dependencies of Anaconda distributions.
+  (:issue:`5213`)
+* (OSX) Automatically remove the signature from the collected copy of the
+  ``Python`` shared library, using ``codesign --remove-signature``. This
+  accommodates both ``onedir`` and ``onefile`` builds with recent python
+  versions for macOS, where invalidated signature on PyInstaller-collected
+  copy of the ``Python`` library prevents the latter from being loaded.
+  (:issue:`5451`)
+* (Windows) PyInstaller's console or windowed icon is now added at freeze-time
+  and
+  no longer built into the bootloader. Also, using ``--icon=NONE`` allows to
+  not
+  apply any icon, thereby making the OS to show some default icon.
+  (:issue:`4700`)
+* (Windows) Enable ``longPathAware`` option in built application's manifest in
+  order to support long file paths on Windows 10 v.1607 and later.
+  (:issue:`5424`)
+
+
+Bugfix
+~~~~~~
+
+* Fix loading of plugin-type modules at run-time of the frozen application:
+  If the plugin path is one character longer than sys._MEIPATH
+  (e.g. "$PWD/p/plugin_1" and "$PWD/dist/main"),
+  the plugin relative-imports a sub-module (of the plugin)
+  and the frozen application contains a module of the same name,
+  the frozen application module was imported. (:issue:`4141`, :issue:`4299`)
+* Ensure that spec for frozen packages has ``submodule_search_locations`` set
+  in order to fix compatibility  with ``importlib_resources`` 3.2.0 and later.
+  (:issue:`5396`)
+* Fix: No rebuild if "noarchive" build-option changes. (:issue:`5404`)
+* (OSX) Fix the problem with ``Python`` shared library collected from
+  recent python versions not being loaded due to invalidated signature.
+  (:issue:`5062`, :issue:`5272`, :issue:`5434`)
+* (Windows) PyInstaller's default icon is no longer built into the bootloader,
+  but
+  added at freeze-time. Thus, when specifying an icon, only that icon is
+  contained in the executable and displayed for a shortcut. (:issue:`870`,
+  :issue:`2995`)
+* (Windows) Fix "toc is bad" error messages
+  when passing a ``VSVersionInfo``
+  as the ``version`` parameter to ``EXE()``
+  in a ``.spec`` file. (:issue:`5445`)
+* (Windows) Fix exception when trying to read a manifest from an exe or dll.
+  (:issue:`5403`)
+* (Windows) Fix the ``--runtime-tmpdir`` option by creating paths if they don't
+  exist and expanding environment variables (e.g. ``%LOCALAPPDATA%``).
+  (:issue:`3301`, :issue:`4579`, :issue:`4720`)
+
+
+Hooks
+~~~~~
+
+* (GNU/Linux) Collect ``xcbglintegrations`` and ``egldeviceintegrations``
+  plugins as part of ``Qt5Gui``. (:issue:`5349`)
+* (macOS) Fix: Unable to code sign apps built with GTK (:issue:`5435`)
+* (Windows) Add a hook for ``win32ctypes.core``. (:issue:`5250`)
+* Add hook for ``scipy.spatial.transform.rotation`` to fix compatibility with
+  SciPy 1.6.0. (:issue:`5456`)
+* Add hook-gi.repository.GtkosxApplication to fix TypeError with Gtk macOS
+  apps. (:issue:`5385`)
+* Add hooks utilities to find binary dependencies of Anaconda distributions.
+  (:issue:`5213`)
+* Fix the ``Qt5`` library availability check in ``PyQt5`` and ``PySide2`` hooks
+  to re-enable support for ``Qt5`` older than 5.8. (:issue:`5425`)
+* Implement ``exec_statement_rc()`` and ``exec_script_rc()`` as exit-code
+  returning counterparts of ``exec_statement()`` and ``exec_script()``.
+  Implement ``can_import_module()`` helper for hooks that need to query module
+  availability. (:issue:`5301`)
+* Limit the impact of a failed sub-package import on the result of
+  ``collect_submodules()`` to ensure that modules from all other sub-packages
+  are collected. (:issue:`5426`)
+* Removed obsolete ``pygame`` hook. (:issue:`5362`)
+* Update ``keyring`` hook to collect metadata, which is required for backend
+  discovery. (:issue:`5245`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (GNU/Linux) Reintroduce executable resolution via ``readlink()`` on
+  ``/proc/self/exe`` and preserve the process name using ``prctl()`` with
+  ``PR_GET_NAME`` and ``PR_SET_NAME``. (:issue:`5232`)
+* (Windows) Create temporary directories with user's SID instead of
+  ``S-1-3-4``,
+  to work around the lack of support for the latter in ``wine``.
+  This enables ``onefile`` builds to run under ``wine`` again. (:issue:`5216`)
+* (Windows) Fix a bug in path-handling code with paths exceeding ``PATH_MAX``,
+  which is caused by use of ``_snprintf`` instead of ``snprintf`` when
+  building with MSC. Requires Visual Studio 2015 or later.
+  Clean up the MSC codepath to address other compiler warnings.
+  (:issue:`5320`)
+* (Windows) Fix building of bootloader's test suite under Windows with Visual
+  Studio.
+  This fixes build errors when ``cmocka`` is present in the build environment.
+  (:issue:`5318`)
+* (Windows) Fix compiler warnings produced by MinGW 10.2 in order to allow
+  building the bootloader without having to suppress the warnings.
+  (:issue:`5322`)
+* (Windows) Fix ``windowed+debug`` bootloader variant not properly
+  displaying the exception message and traceback information when the
+  frozen script terminates due to uncaught exception. (:issue:`5446`)
+
+
+PyInstaller Core
+~~~~~~~~~~~~~~~~
+
+* (Windows) Avoid using UPX with DLLs that have control flow guard (CFG)
+  enabled. (:issue:`5382`)
+* Avoid using ``.pyo`` module file suffix (removed since PEP-488) in
+  ``noarchive`` mode. (:issue:`5383`)
+* Improve support for ``PEP-420`` namespace packages. (:issue:`5354`)
+* Strip absolute paths from ``.pyc`` modules collected in the CArchive (PKG).
+  This enables build reproducibility without having to match the location of
+  the build environment. (:issue:`5380`)
+
+
+4.1 (2020-11-18)
+----------------
+
+Features
+~~~~~~~~
+
+* Add support for Python 3.9. (:issue:`5289`)
+* Add support for Python 3.8. (:issue:`4311`)
+
+
+Bugfix
+~~~~~~
+
+* Fix endless recursion if a package's ``__init__`` module is an extension
+  module. (:issue:`5157`)
+* Remove duplicate logging messages (:issue:`5277`)
+* Fix sw_64 architecture support (:issue:`5296`)
+* (AIX) Include python-malloc labeled libraries in search for libpython.
+  (:issue:`4210`)
+
+
+Hooks
+~~~~~
+
+* Add ``exclude_datas``, ``include_datas``, and ``filter_submodules`` to
+  ``collect_all()``. These arguments map to the ``excludes`` and ``includes``
+  arguments of ``collect_data_files``, and to the `filter` argument of
+  ``collect_submodules``. (:issue:`5113`)
+* Add hook for difflib to not pull in doctests, which is only
+  required when run as main program.
+* Add hook for distutils.util to not pull in lib2to3 unittests, which will be
+  rearly used in frozen packages.
+* Add hook for heapq to not pull in doctests, which is only
+  required when run as main program.
+* Add hook for multiprocessing.util to not pull in python test-suite and thus
+  e.g. tkinter.
+* Add hook for numpy._pytesttester to not pull in pytest.
+* Add hook for pickle to not pull in doctests and argpargs, which are only
+  required when run as main program.
+* Add hook for PIL.ImageFilter to not pull
+  numpy, which is an optional component.
+* Add hook for setuptools to not pull in numpy, which is only imported if
+  installed, not mean to be a dependency
+* Add hook for zope.interface to not pull in pytest unittests, which will be
+  rearly used in frozen packages.
+* Add hook-gi.repository.HarfBuzz to fix Typelib error with Gtk apps.
+  (:issue:`5133`)
+* Enable overriding Django settings path by `DJANGO_SETTINGS_MODULE`
+  environment variable. (:issue:`5267`)
+* Fix `collect_system_data_files` to scan the given input path instead of its
+  parent.
+  File paths returned by `collect_all_system_data` are now relative to the
+  input path. (:issue:`5110`)
+* Fix argument order in ``exec_script()`` and ``eval_script()``.
+  (:issue:`5300`)
+* Gevent hook does not unnecessarily bundle HTML documentation, __pycache__
+  folders, tests nor generated .c and .h files (:issue:`4857`)
+* gevent: Do not pull in test-suite (still to be refined)
+* Modify hook for ``gevent`` to exclude test submodules. (:issue:`5201`)
+* Prevent .pyo files from being collected by collect_data_files when
+  include_py_files is False. (:issue:`5141`)
+* Prevent output to ``stdout`` during module imports from ending up in the
+  modules list collected by ``collect_submodules``. (:issue:`5244`)
+* Remove runtime hook and fix regular hook for matplotlib's data to support
+  ``matplotlib>=3.3.0``, fix deprecation warning on version 3.1<= & <3.3,
+  and behave normally for versions <3.1. (:issue:`5006`)
+* Remove support for deprecated PyQt4 and PySide (:issue:`5118`,
+  :issue:`5126`)
+* setuptools: Exclude outdated compat modules.
+* Update ``sqlalchemy`` hook to support v1.3.19 and later,  by adding
+  ``sqlalchemy.ext.baked`` as a hidden import (:issue:`5128`)
+* Update ``tkinter`` hook to collect Tcl modules directory (``tcl8``) in
+  addition to Tcl/Tk data directories. (:issue:`5175`)
+* (GNU/Linux) {PyQt5,PySide2}.QtWebEngineWidgets: fix search for extra NSS
+  libraries to prevent an error on systems where /lib64/nss/\*.so
+  comes up empty. (:issue:`5149`)
+* (OSX) Avoid collecting data from system Tcl/Tk framework in ``tkinter`` hook
+  as we do not collect their shared libraries, either.
+  Affects only python versions that still use the system Tcl/Tk 8.5.
+  (:issue:`5217`)
+* (OSX) Correctly locate the tcl/tk framework bundled with official
+  python.org python builds from v.3.6.5 on. (:issue:`5013`)
+* (OSX) Fix the QTWEBENGINEPROCESS_PATH set in PyQt5.QtWebEngineWidgets rthook.
+  (:issue:`5183`)
+* (OSX) PySide2.QtWebEngineWidgets: add QtQmlModels to included libraries.
+  (:issue:`5150`)
+* (Windows) Remove the obsolete python2.4-era ``_handle_broken_tcl_tk``
+  work-around for old virtual environments from the ``tkinter`` hook.
+  (:issue:`5222`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* Fix freeing memory allocated by Python using ``free()`` instead of
+  ``PyMem_RawFree()``. (:issue:`4441`)
+* (GNU/Linux) Avoid segfault when temp path is missing. (:issue:`5255`)
+* (GNU/Linux) Replace a ``strncpy()`` call in ``pyi_path_dirname()`` with
+  ``snprintf()`` to ensure that the resulting string is always null-terminated.
+  (:issue:`5212`)
+* (OSX) Added capability for already-running apps to accept URL & drag'n drop
+  events via Apple Event forwarding (:issue:`5276`)
+* (OSX) Bump ``MACOSX_DEPLOYMENT_TARGET`` from 10.7 to 10.13. (:issue:`4627`,
+  :issue:`4886`)
+* (OSX) Fix to reactivate running app on "reopen" (:issue:`5295`)
+* (Windows) Use ``_wfullpath()`` instead of ``_fullpath()`` in
+  ``pyi_path_fullpath`` to allow non-ASCII characters in the path.
+  (:issue:`5189`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Add zlib to build the requirements in the Building the Bootlooder section of
+  the docs. (:issue:`5130`)
+
+
+PyInstaller Core
+~~~~~~~~~~~~~~~~
+
+* Add informative message what do to if RecurrsionError occurs.
+  (:issue:`4406`, :issue:`5156`)
+* Prevent a local directory with clashing name from shadowing a system library.
+  (:issue:`5182`)
+* Use module loaders to get module content instea of an quirky way semming from
+  early Python 2.x times. (:issue:`5157`)
+* (OSX) Exempt the ``Tcl``/``Tk`` dynamic libraries in the system framework
+  from relative path overwrite. Fix missing ``Tcl``/``Tk`` dynlib on older
+  python.org builds that still make use of the system framework.
+  (:issue:`5172`)
 
 
 Test-suite and Continuous Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Add script and dockerfile for running tests in docker. (Contributed, not
-  maintained) (:issue:`#3519`)
-* Avoid log messages to be written (and captured) twice.
-* Fix decorator ``skipif_no_compiler``.
-* Fix the test for the "W" run-time Python option to verify module *warnings*
-  can actually be imported. (:issue:`#3402`, :issue:`#3406`)
-* Fix unicode errors when not capturing output by pytest.
-* Run ``pyinstaller -h`` to verify it works.
-* ``test_setuptools_nspkg`` no longer modifies source files.
-* Appveyor:
-
-  - Add documentation for Appveyor variables used to ``appveyor.yml``.
-  - Significantly clean-up appveyor.yml (:issue:`#3107`)
-  - Additional tests produce > 1 hour runs. Split each job into two
-    jobs.
-  - Appveyor tests run on 2 cores; therefore, run 2 jobs in parallel.
-  - Reduce disk usage.
-  - Split Python 2.7 tests into two jobs to avoid the 1 hour limit.
-  - Update to use Windows Server 2016. (:issue:`#3563`)
-* Travis
-
-  - Use build-stages.
-  - Clean-up travis.yml (:issue:`#3108`)
-  - Fix Python installation on OS X. (:issue:`#3361`)
-  - Start a X11 server for the "Test - Libraries" stage only.
-  - Use target python interpreter to compile bootloader to check if the
-    build tool can be used with that this Python version.
+* Replace ``skipif_xxx`` for platform-specific tests by markers.
+  (:issue:`1427`)
+* Test/CI: Test failures are automatically retried once. (:issue:`5214`)
 
 
 Bootloader build
 ~~~~~~~~~~~~~~~~
 
-* Print invoking python version when compiling.
-* Update `waf` build-tool to 2.0.9 and fix our ``wscript`` for `waf` 2.0.
-* (GNU/Linux) When building with ``--debug`` turn of FORTIFY_SOURCE to ease
-  debugging.
+* Fix AppImage builds that were broken since PyInstaller 3.6. (:issue:`4693`)
+* Update build system to use Python 3.
+* OSX: Fixed the ineffectiveness of the ``--distpath`` argument for the
+  ``BUNDLE`` step. (:issue:`4892`)
+* OSX: Improve codesigning and notarization robustness. (:issue:`3550`,
+  :issue:`5112`)
+* OSX: Use high resolution mode by default for GUI applications.
+  (:issue:`4337`)
 
 
-.. _v3.4 known issues:
-
-Known Issues
-~~~~~~~~~~~~~~~~~~
-
-* Anaconda's PyQt5 packages are not supported
-  because its ``QlibraryInfo`` implementation reports incorrect values.
-* All scripts frozen into the package, as well as all run-time hooks, share
-  the same global variables. This issue exists since v3.2 but was discovered
-  only lately, see :issue:`3037`. This may lead to leaking global variables
-  from run-time hooks into the script and from one script to subsequent ones.
-  It should have effects in rare cases only, though.
-* Data-files from wheels, unzipped eggs or not ad egg at all are not included
-  automatically. This can be worked around using a hook-file, but may not
-  suffice when using ``--onefile`` and something like `python-daemon`.
-
-* The multipackage (MERGE) feature (:issue:`1527`) is currently broken.
-* (OSX) Support for OpenDocument events (:issue:`1309`) is broken.
-* (Windows) With Python 2.7 the frozen application may not run if the
-  user-name (more specifically ``%TEMPDIR%``) includes some Unicode
-  characters. This does not happen with all Unicode characters, but only some
-  and seems to be a windows bug. As a work-around please upgrade to Python 3
-  (:issue:`2754`, :issue:`2767`).
-* (Windows) For Python >= 3.5 targeting *Windows < 10*, the developer needs to
-  take special care to include the Visual C++ run-time .dlls. Please see the
-  section :ref:`Platform-specific Notes <Platform-specific Notes - Windows>`
-  in the manual. (:issue:`1566`)
-
-
-3.3.1 (2017-12-13)
-------------------
-
-Hooks
-~~~~~~~~~~
-
-* Fix imports in hooks accessible_output and sound_lib (#2860).
-* Fix ImportError for sysconfig for 3.5.4 Conda (#3105, #3106).
-* Fix shapely hook for conda environments on Windows (#2838).
-* Add hook for unidecode.
-
-Bootloader
-~~~~~~~~~~~~~~
-
-* (Windows) Pre-build bootloaders (and custom-build ones using MSVC) can be
-  used on Windows XP again. Set minimum target OS to XP (#2974).
-
-Bootloader build
-~~~~~~~~~~~~~~~~~~~
-
-* Fix build for FreeBSD (#2861, #2862).
-
-PyInstaller Core
-~~~~~~~~~~~~~~~~~~~~~~~
-
-* Usage: Add help-message clarifying use of options when a spec-file is
-  provided (#3039).
-
-* Add printing infos on UnicodeDecodeError in exec_command(_all).
-* (win32) Issue an error message on errors loading the icon file (#2039).
-* (aarch64) Use correct bootloader for 64-bit ARM (#2873).
-* (OS X) Fix replacement of run-time search path keywords (``@…`` ) (#3100).
-
-* Modulegraph
-
-  * Fix recursion too deep errors cause by reimporting SWIG-like modules
-    (#2911, #3040, #3061).
-  * Keep order of imported identifiers.
-
-
-Test-suite and Continuous Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-* In Continuous Integration tests: Enable flake8-diff linting. This will
-  refuse all changed lines not following PEP 8.
-
-* Enable parallel testing on Windows,
-* Update requirements.
-* Add more test cases for modulegraph.
-* Fix a test-case for order of module import.
-
-* Add test-cases to check scripts do not share the same global vars (see
-  :ref:`v3.3.1 known issues`).
-
-Documentation
-~~~~~~~~~~~~~~~~~~~
-
-* Add clarification about treatment of options when a spec-file is provided
-  (#3039).
-* Add docs for running PyInstaller with Python optimizations (#2905).
-
-* Add notes about limitations of Cython support.
-* Add information how to handle undetected ctypes libraries.
-* Add notes about requirements and restrictions of SWIG support.
-* Add note to clarify what `binary files` are.
-
-* Add a Development Guide.
-* Extend "How to Contribute".
-* Add "Running the Test Suite".
-
-* Remove badges from the Readme (#2853).
-
-* Update outdated sections in man-pages and otehr enhancements to the
-  man-page.
-
-
-.. _v3.3.1 known issues:
-
-Known Issues
-~~~~~~~~~~~~~~~~~~
-
-* All scripts frozen into the package, as well as all run-time hooks, share
-  the same global variables. This issue exists since v3.2 but was discovered
-  only lately, see :issue:`3037`. This may lead to leaking global variables
-  from run-time hooks into the script and from one script to subsequent ones.
-  It should have effects in rare cases only, though.
-
-* Further see the :ref:`Known Issues for release 3.3 <v3.3 known issues>`.
-
-
-3.3 (2017-09-21)
+4.0 (2020-08-08)
 ----------------
 
-* **Add Support for Python 3.6!** Many thanks to xiovat! (#2331, #2341)
+Features
+~~~~~~~~
 
-* New command line options for adding data files (``--datas``, #1990) and
-  binaries (``--binaries``, #703)
+* Provide setuptools entrypoints to enable other packages to provide
+  PyInstaller hooks specific to that package, along with tests for these
+  hooks.
 
-* Add command line option '--runtime-tmpdir'.
+  Maintainers of Python packages requiring hooks are invited to use this new
+  feature and provide up-to-date PyInstaller support along with their package.
+  This is quite easy, see our `sample project`__ for more information
+  (:issue:`4232`, :issue:`4301`, :issue:`4582`).
+  Many thanks to Bryan A. Jones for implementing the important parts.
 
-* Bootloaders for Windows are now build using MSVC and statically linked with
-  the run-time-library (CRT). This solved a lot of issues related to .dlls
-  being incompatible with the ones required by ``python.dll``.
+  __ https://github.com/pyinstaller/hooksample
 
-* Bootloaders for GNU/Linux are now officially no LSB binaries. This was
-  already the case since release 3.1, but documented the other way round. Also
-  the build defaults to non-LSB binaries now. (#2369)
+* A new package `pyinstaller-hooks-contrib`__ provides monthly updated hooks
+  now. This package is installed automatically when installing PyInstaller,
+  but can be updated independently.
+  Many thanks to Legorooj for setting up the new package
+  and moving the hooks there.
 
-* We improved and stabilized both building the bootloaders and the continuous
-  integration tests. See below for details. Many thanks to all who worked on
-  this.
+  __ https://github.com/pyinstaller/pyinstaller-hooks-contrib
 
-* To ease solving issues with packages included wrongly, the html-file with a
-  cross-reference is now always generated. It's visual appearance has been
-  modernized (#2765).
+* Added the ``excludes`` and ``includes`` arguments to the hook utility
+  function ``collect_data_files``.
+* Change the hook collection order so that the hook-priority is command line,
+  then entry-point, then PyInstaller builtins. (:issue:`4876`)
 
-Incompatible changes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Command-line option obsoleted several version ago are not longer handled
-  gracefully but raise an error (#2413)
+Bugfix
+~~~~~~
 
-* Installation: PyInstaller removed some internal copies of 3rd-party
-  packages. These are now taken from their official releases at PyPI (#2589).
-  This results in PyInstaller to no longer can be used from just an unpacked
-  archive, but needs to be installed like any Python package. This should
-  effect only a few people, e.g. the developers.
+* (AIX) Include python-malloc labeled libraries in search for libpython.
+  (:issue:`4738`)
+* (win32) Fix Security Alerts caused by subtle implementation differences
+  between posix anf windows in ``os.path.dirname()``. (:issue:`4707`)
+* (win32) Fix struct format strings for versioninfo. (:issue:`4861`)
+* (Windows) cv2: bundle the `opencv_videoio_ffmpeg*.dll`, if available.
+  (:issue:`4999`)
+* (Windows) GLib: bundle the spawn helper executables for `g_spawn*` API.
+  (:issue:`5000`)
+* (Windows) PySide2.QtNetwork: search for SSL DLLs in `PrefixPath` in addition
+  to `BinariesPath`. (:issue:`4998`)
+* (Windows) When building with 32-bit python in onefile mode, set the
+  ``requestedExecutionLevel`` manifest key every time and embed the manifest.
+  (:issue:`4992`)
+* * (AIX) Fix uninitialized variable. (:issue:`4728`, :issue:`4734`)
+* Allow building on a different drive than the source. (:issue:`4820`)
+* Consider Python<version> as possible library binary path. Fixes issue where
+  python is not found if Python3 is installed via brew on OSX (:issue:`4895`)
+* Ensure shared dependencies from onefile packages can be opened in the
+  bootloader.
+* Ensuring repeatable builds of base_library.zip. (:issue:`4654`)
+* Fix ``FileNotFoundError`` showing up in ``utils/misc.py`` which occurs when a
+  namespace was processed as an filename. (:issue:`4034`)
+* Fix multipackaging. The `MERGE` class will now have the correct relative
+  paths
+  between shared dependencies which can correctly be opened by the bootloader.
+  (:issue:`1527`, :issue:`4303`)
+* Fix regression when trying to avoid hard-coded paths in .spec files.
+* Fix SIGTSTP signal handling to allow typing Ctrl-Z from terminal.
+  (:issue:`4244`)
+* Update the base library to support encrypting Python bytecode (``--key``
+  option) again. Many thanks to Matteo Bertini for finally fixing this.
+  (:issue:`2365`, :issue:`3093`, :issue:`3133`, :issue:`3160`,
+  :issue:`3198`, :issue:`3316`, :issue:`3619`, :issue:`4241`,
+  :issue:`4652`)
+* When stripping the leading parts of paths in compiled code objects, the
+  longest possible import path will now be stripped. (:issue:`4922`)
 
-* Following :pep:`527`, we only release one source archive now and decided to
-  use `.tar.gz` (#2754).
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* Remove support for Python 2.7. The minimum required version is now Python
+  3.5. The last version supporting Python 2.7 was PyInstaller 3.6.
+  (:issue:`4623`)
+* Many hooks are now part of the new `pyinstaller-hooks-contrib`
+  repository. See below for a detailed list.
+
 
 Hooks
-~~~~~~~~~~
+~~~~~
 
-* New and Updated hooks: accessible_output2 (#2266), ADIOS (#2096), CherryPy
-  (#2112), PySide2 (#2471, #2744) (#2472), Sphinx (#2612, 2708) (#2708),
-  appdir (#2478), clr (#2048), cryptodome (#2125), cryptography (#2013), dclab
-  (#2657), django (#2037), django migrations (#1795), django.contrib (#2336),
-  google.cloud, google.cloud.storage, gstreamer (#2603), imageio (#2696),
-  langcodes (#2682), libaudioverse (#2709), mpl_toolkits (#2400), numba,
-  llvmlite (#2113), openpyxl (#2066), pylint, pymssql, pyopencl, pyproj
-  (#2677), pytest (#2119), qtawesome (#2617), redmine, requests (#2334),
-  setuptools, setuptools (#2565), shapely (#2569), sound_lib (#2267),
-  sysconfig, uniseg (#2683), urllib3, wx.rc (#2295),
+* Add hook for ``scipy.stats._stats`` (needed for scipy since 1.5.0).
+  (:issue:`4981`)
+* Prevent hook-nltk from adding non-existing directories. (:issue:`3900`)
+* Fix ``importlib_resources`` hook for modern versions (after 1.1.0).
+  (:issue:`4889`)
+* Fix hidden imports in `pkg_resources`__ and `packaging`__  (:issue:`5044`)
 
-  * numpy: Look for .dylib libraries, too ( (#2544), support numpy MKL builds
-    (#1881, #2111)
+  - Add yet more hidden imports to pkg_resources hook.
+  - Mirror the pkg_resources hook for packaging which may or may not be
+    duplicate of ``pkg_resources._vendor.packaging``.
 
-  * osgeo: Add conda specific places to check for auxiliary data (#2401)
+  __ https://setuptools.readthedocs.io/en/latest/pkg_resources.html
+  __ https://packaging.pypa.io/en/latest/
 
-  * QT and related
+* Update pkg_resources hook for setuptools v45.0.0.
+* Add QtQmlModels to included libraries for QtWebEngine on OS X
+  (:issue:`4631`).
+* Fix detecting Qt5 libraries and dependencies from conda-forge builds
+  (:issue:`4636`).
+* Add an AssertionError message so that users who get an error due
+  to Hook conflicts can resolve it (:issue:`4626`).
 
-    - Add hooks for PySide2
-    - Eliminate run-time hook by placing files in the correct directory
-    - Fix path in homebrew for searching for qmake (#2354)
-    - Repair Qt dll location  (#2403)
-    - Bundle PyQT 5.7 DLLs (#2152)
-    - PyQt5: Return qml plugin path including subdirectory (#2694)
-    - Fix hooks for PyQt5.QtQuick (#2743)
-    - PyQt5.QtWebEngineWidgets: Include files needed by QWebEngine
+* These hooks have been moved to the new
+  `pyinstaller-hooks-contrib`__ repository:
+  BTrees, Crypto, Cryptodome, IPython, OpenGL, OpenGL_accelerate,
+  Xlib, accessible_output2, adios, aliyunsdkcore, amazonproduct,
+  appdirs, appy, astor, astroid, astropy, avro, bacon, boto, boto3,
+  botocore, certifi, clr, countrycode, cryptography, cv2, cx_Oracle,
+  cytoolz, dateparser, dclab, distorm3, dns, docutils, docx, dynaconf,
+  enchant, enzyme, eth_abi, eth_account, eth_hash, eth_keyfile,
+  eth_utils, faker, flex, fmpy, gadfly, gooey, google.*, gst, gtk,
+  h5py, httplib, httplib2, imageio, imageio_ffmpeg, jedi, jinja2,
+  jira, jsonpath_rw_ext, jsonschema, jupyterlab, kinterbasdb,
+  langcodes, lensfunpy, libaudioverse, llvmlite, logilab, lxml, lz4,
+  magic, mako, markdown, migrate, mpl_toolkits, mssql, mysql, nacl,
+  names, nanite, nbconvert, nbdime, nbformat, ncclient, netCDF4, nltk,
+  nnpy, notebook, numba, openpyxl, osgeo, passlib, paste, patsy,
+  pendulum, phonenumbers, pint, pinyin, psychopy, psycopg2, pubsub,
+  pyarrow, pycountry, pycparser, pyexcel, pyexcelerate, pylint,
+  pymssql, pyodbc, pyopencl, pyproj, pysnmp, pytest, pythoncom,
+  pyttsx, pywintypes, pywt, radicale, raven, rawpy, rdflib, redmine,
+  regex, reportlab, reportlab, resampy, selenium, shapely, skimage,
+  sklearn, sound_lib, sounddevice, soundfile, speech_recognition,
+  storm, tables, tcod, tensorflow, tensorflow_corethon,
+  text_unidecode, textdistance, torch, ttkthemes, ttkwidgets, u1db,
+  umap, unidecode, uniseg, usb, uvloop, vtkpython, wavefile,
+  weasyprint, web3, webrtcvad, webview, win32com, wx, xml.dom,
+  xml.sax, xsge_gui, zeep, zmq.
 
-  * GKT+ and related
+  __ https://github.com/pyinstaller/pyinstaller-hooks-contrib
 
-    - Fix Gir file path on windows.
-    - Fix unnecessary file search & generation when GI's typelib is exists
-    - gi: change gir search path when running from a virtualenv
-    - gi: package gdk-pixbuf in osx codesign agnostic dir
-    - gi: rewrite the GdkPixbuf loader cache at runtime on Linux
-    - gi: support onefile mode for GdkPixbuf
-    - gi: support using gdk-pixbuf-query-loaders-64 when present
-    - gi: GIR files are only required on OSX
-    - gio: copy the mime.cache also
-    - Fix hooks for PyGObject on windows platform (#2306)
+* These hooks have been added while now moved to the new
+  `pyinstaller-hooks-contrib` repository: astor (:issue:`4400`,
+  :issue:`4704`), argon2 (:issue:`4625`) bcrypt. (:issue:`4735`),
+  (Bluetooth Low Energy platform Agnostic Klient for Python) (:issue:`4649`)
+  jaraco.text (:issue:`4576`, :issue:`4632`), LightGBM. (:issue:`4634`),
+  xmldiff (:issue:`4680`), puremagic (identify a file based off it's magic
+  numbers) (:issue:`4709`) webassets (:issue:`4760`), tensorflow_core (to
+  support tensorflow module forwarding logic (:issue:`4400`, :issue:`4704`)
 
-* Fixed hooks: botocore (#2384), clr (#1801), gstreamer (#2417), h5py
-  (#2686), pylint, Tix data files (#1660), usb.core (#2088), win32com on
-  non-windows-systems (#2479)
+* These changes have been applied to hooks now moved to the new
+  `pyinstaller-hooks-contrib` repository
 
-* Fix ``multiprocess`` spawn mode on POSIX OSs (#2322, #2505, #2759, #2795).
+  - Update Bokeh hook for v2.0.0. (:issue:`4742`, :issue:`4746`)
+  - Fix shapely hook on Windows for non-conda shapely installations.
+    (:issue:`2834`, :issue:`4749`)
+
 
 Bootloader
-~~~~~~~~~~~~~~
+~~~~~~~~~~
 
-* Add `tempdir` option to control where bootloader will extract files (#2221)
-* (Windows) in releases posted on PyPI requires msvcr*.dll (#2343)
-* Fix unsafe string manipulation, resource and memory leaks. Thanks to Vito
-  Kortbeek (#2489, #2502, #2503)
-* Remove a left-over use of ``getenv()``
-* Set proper LISTEN_PID (set by `systemd`) in child process (#2345)
-* Adds PID to bootloader log messages (#2466, #2480)
+* Rework bootloader from using strcpy/strncpy with "is this string
+  terminated"-check to use snprintf(); check success at more places. (This
+  started from fixing GCC warnings for strncpy and strncat.)
+* Fix: When copying files, too much data was copied in most cases. This
+  corrupted the file and inhibited using shared dependencies. (:issue:`4303`)
+* In debug and windowed mode, show the traceback in dialogs to help debug
+  pyiboot01_bootstrap errors. (:issue:`4213`, :issue:`4592`)
+* Started a small test-suite for bootloader basic functions. (:issue:`4585`)
 
-* (Windows) Use _wputenv_s() instead of ``SetEnvironmentVariableW()``
-* (Windows) Enhance error messages (#1431)
-* (Windows) Add workaround for a Python 3 issue
-  http://bugs.python.org/issue29778 (#2496, #2844)
-
-* (OS X): Use single process for --onedir mode (#2616, #2618)
-
-* (GNU/Linux) Compile bootloaders with --no-lsb by default (#2369)
-* (GNU/Linux) Fix: linux64 bootloader requires glibc 2.14 (#2160)
-* (GNU/Linux) set_dynamic_library_path change breaks plugin library use
-  (#625)
-
-Bootloader build
-~~~~~~~~~~~~~~~~~~~
-
-The bootloader build was largely overhauled. In the wscript, the build no
-longer depends on the Python interpreter's bit-size, but on the compiler. We
-have a machine for building bootloaders for Windows and cross-building for
-OS X. Thus all mainteriner are now able to build the bootloaders for all
-supported platforms.
-
-* Add "official" build-script.
-
-* (GNU/Linux) Make --no-lsb the default, add option --lsb.
-
-* Largely overhauled Vagrantfile:
-
-    - Make Darwin bootloaders build in OS X box (unused)
-    - Make Windows bootloaders build using MSVC
-    - Allow specifying cross-target on linux64.
-    - Enable cross-building for OS X.
-    - Enable cross-building for Windows (unused)
-    - Add box for building osxcross.
-
-* Largely overhauled wscript:
-
-    - Remove options --target-cpu.
-    - Use compiler's target arch, not Python's.
-    - Major overhaul of the script
-    - Build zlib if required, not if "on windows".
-    - Remove obsolete warnings.
-    - Update Solaris, AIX and HPUX support.
-    - Add flags for 'strip' tool in AIX platform.
-    - Don't set POSIX / SUS version defines.
-
-* (GNU/Linux) for 64-bit arm/aarch ignore the :program:`gcc` flag ``-m64``
-  (#2801).
-
-Module loader
-~~~~~~~~~~~~~~~~~~~~~~
-
-* Implement PEP-451 ModuleSpec type import system (#2377)
-* Fix: Import not thread-save? (#2010, #2371)
-
-PyInstaller Core
-~~~~~~~~~~~~~~~~~~~~~~~
-
-* Analyze: Check Python version when testing whether to rebuild.
-* Analyze: Don't fail on syntax error in modules, simply ignore them.
-* Better error message when `datas` are not found. (#2308)
-* Building: OSX: Use unicode literals when creating Info.plist XML
-* Building: Don't fail if "datas" filename contain glob special characters.
-  (#2314)
-* Building: Read runtime-tmpdir from .spec-file.
-* Building: Update a comment.
-* building: warn users if bincache gets corrupted. (#2614)
-* Cli-utils: Remove graceful handling of obsolete command line options.
-* Configure: Create new parent-dir when moving old cache-dir. (#2679)
-* Depend: Include vcruntime140.dll on Windows. (#2487)
-* Depend: print nice error message if analyzed script has syntax error.
-* Depend: When scanning for ctypes libs remove non-basename binaries.
-* Enhance run-time error message on ctypes import error.
-* Fix #2585: py2 non-unicode sys.path been tempted by os.path.abspath().
-  (#2585)
-* Fix crash if extension module has hidden import to ctypes. (#2492)
-* Fix handling of obsolete command line options. (#2411)
-* Fix versioninfo.py breakage on Python 3.x (#2623)
-* Fix: "Unicode-objects must be encoded before hashing" (#2124)
-* Fix: UnicodeDecodeError - collect_data_files does not return filenames as
-  unicode (#1604)
-* Remove graceful handling of obsolete command line options. (#2413)
-* Make grab version more polite on non-windows (#2054)
-* Make utils/win32/versioninfo.py round trip the version info correctly.
-* Makespec: Fix version number processing for PyCrypto. (#2476)
-* Optimizations and refactoring to modulegraph and scanning for ctypes
-  dependencies.
-* pyinstaller should not crash when hitting an encoding error in source code
-  (#2212)
-* Remove destination for COLLECT and EXE prior to copying it (#2701)
-* Remove uninformative traceback when adding not found data files (#2346)
-* threading bug while processing imports (#2010)
-* utils/hooks: Add logging to collect_data_files.
-
-* (win32) Support using pypiwin32 or pywin32-ctypes (#2602)
-* (win32) Use os.path.normpath to ensure that system libs are excluded.
-* (win32) Look for libpython%.%.dll in Windows MSYS2 (#2571)
-* (win32) Make versioninfo.py round trip the version info correctly (#2599)
-* (win32) Ensure that pywin32 isn't imported before check_requirements is
-  called
-
-* (win32) pyi-grab_version and --version-file not working? (#1347)
-* (win32) Close PE() object to avoid mmap memory leak (#2026)
-* (win32) Fix: ProductVersion in windows version info doesn't show in some
-  cases (#846)
-* (win32) Fix multi-byte path bootloader import issue with python2 (#2585)
-* (win32) Forward DYLD_LIBRARY_PATH through `arch` command. (#2035)
-* (win32) Add ``vcruntime140.dll`` to_win_includes for Python 3.5 an 3.6
-  (#2487)
-
-* (OS X) Add libpython%d.%dm.dylib to Darwin (is_darwin) PYDYLIB_NAMES.
-  (#1971)
-* (OS X) macOS bundle Info.plist should be in UTF-8 (#2615)
-* (OS X) multiprocessing spawn in python 3 does not work on macOS (#2322)
-* (OS X) Pyinstaller not able to find path (@rpath) of dynamic library (#1514)
-
-* Modulegraph
-
-  - Align with upstream version 0.13.
-  - Add the upstream test-suite
-  - Warn on syntax error and unicode error. (#2430)
-  - Implement ``enumerate_instructions()`` (#2720)
-  - Switch byte-code analysis to use `Instruction` (like dis3 does) (#2423)
-  - Log warning on unicode error instead of only a debug message (#2418)
-  - Use standard logging for messages. (#2433)
-  - Fix to reimport failed SWIG C modules (1522, #2578).
-
-* Included 3rd-party libraries
-
-  - Remove bundled ``pefile`` and ``macholib``, use the releases from PyPI.
-    (#1920, #2689)
-  - altgraph: Update to altgraph 0.13, add upstream test-suite.
-
-Utilities
-~~~~~~~~~~~~~~~
-
-* :program:`grab_version.py`: Display a friendly error message when utility
-  fails (#859, #2792).
-
-
-Test-suite and Continuous Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-* Rearrange requirements files.
-* Pin required versions – now updated using pyup (#2745)
-* Hide useless trace-backs of helper-functions.
-* Add a test for PyQt5.QtQuick.
-* Add functional tests for PySide2
-* Add test for new feature --runtime-tmpdir.
-* Fix regression-test for #2492.
-* unit: Add test-cases for PyiModuleGraph.
-* unit/altgraph: Bringing in upstream altgraph test-suite.
-* unit/modulegraph: Bringing in the modulegraph test-suite.
-
-* Continuous Integration
-
-  - Lots of enhancements to the CI tests to make them more stabile and
-    reliable.
-  - Pin required versions – now updated using pyup (#2745)
-  - OS X is now tested along with GNU/Linux at Travis CI (#2508)
-  - Travis: Use stages (#2753)
-  - appveyor: Save cache on failure (#2690)
-  - appveyor: Verify built bootloaders have the expected arch.
 
 Documentation
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
-* Add information how to donate (#2755, #2772).
-* Add how to install the development version using pip.
-* Fix installation instructions for development version. (#2761)
-* Better examples for hidden imports.
-* Clarify and fix "Adding Data Files" and "Adding Binary Files". (#2482)
-* Document new command line option '--runtime-tmpdir'.
-* pyinstaller works on powerpc linux, big endian arch (#2000)
-* Largely rewrite section "Building the Bootloader", update from the wiki
-  page.
-* Describe building LSB-compliant bootloader as (now) special case.
-* help2rst: Add cross-reference labels for option-headers.
-* Enable sphinx.ext.intersphinx and links to our website.
-* Sphinx should not "adjust" display of command line documentation (#2217)
+* Add platform-specific usage notes and bootloader build notes for AIX.
+  (:issue:`4731`)
 
-.. _v3.3 known issues:
 
-Known Issues
-~~~~~~~~~~~~~~~~~~
+PyInstaller Core
+~~~~~~~~~~~~~~~~
 
-* Data-files from wheels, unzipped eggs or not ad egg at all are not included
-  automatically. This can be worked around using a hook-file, but may not
-  suffice when using ``--onefile`` and something like `python-daemon`.
+* Provide setuptools entrypoints to enable other packages to provide
+  PyInstaller hooks specific to that package, along with tests for these hooks.
+  See https://github.com/pyinstaller/hooksample for more information.
+  (:issue:`4232`, :issue:`4582`)
 
-* The multipackage (MERGE) feature (#1527) is currently broken.
 
-* (OSX) Support for OpenDocument events (#1309) is broken.
+Bootloader build
+~~~~~~~~~~~~~~~~
 
-* (Windows) With Python 2.7 the frozen application may not run if the
-  user-name (more specifically ``%TEMPDIR%``) includes some Unicode
-  characters. This does not happen with all Unicode characters, but only some
-  and seems to be a windows bug. As a work-around please upgrade to Python 3
-  (#2754, #2767).
+* (AIX) The argument -X32 or -X64 is not recognized by the AIX loader - so this
+  code needs to be removed. (:issue:`4730`, :issue:`4731`)
+* (OSX) Allow end users to override MACOSX_DEPLOYMENT_TARGET and
+  mmacosx-version-min
+  via environment variables and set 10.7 as the fallback value for both.
+  (:issue:`4677`)
+* Do not print info about ``--noconfirm`` when option is already being used.
+  (:issue:`4727`)
+* Update :command:`waf` to version 2.0.20 (:issue:`4839`)
 
-* (Windows) For Python >= 3.5 targeting *Windows < 10*, the developer needs to
-  take special care to include the Visual C++ run-time .dlls. Please see the
-  section :ref:`Platform-specific Notes <Platform-specific Notes - Windows>`
-  in the manual. (#1566)
-
-* For Python 3.3, imports are not thread-safe (#2371#). Since Python 3.3 is
-  end of live at 2017-09-29, we are not going to fix this.
 
 
 Older Versions
@@ -1042,6 +2125,8 @@ Older Versions
    CHANGES-3
    CHANGES-2
    CHANGES-1
+
+.. include:: _common_definitions.txt
 
 .. Emacs config:
  Local Variables:
