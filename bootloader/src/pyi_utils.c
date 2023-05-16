@@ -589,12 +589,16 @@ _check_strict_unpack_mode ()
     static int enabled = -1;
     if (enabled == -1) {
         char *env_strict = pyi_getenv("PYINSTALLER_STRICT_UNPACK_MODE"); /* strdup'd copy or NULL */
-        if (strcmp(env_strict, "0") == 0) {
-            enabled = 0;
+        if (env_strict) {
+            if (strcmp(env_strict, "0") == 0) {
+                enabled = 0;
+            } else {
+                enabled = 1;
+            }
+            free(env_strict);
         } else {
-            enabled = 1;
+            enabled = 0;
         }
-        free(env_strict);
     }
     return enabled;
 }
@@ -1081,7 +1085,6 @@ pyi_utils_create_child(const char *thisfile, const ARCHIVE_STATUS* status,
 {
     pid_t pid = 0;
     int rc = 0;
-    int i;
 
     /* cause nonzero return unless this is overwritten
      * with a successful return code from wait() */

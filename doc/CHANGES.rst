@@ -15,6 +15,180 @@ Changelog for PyInstaller
 
 .. towncrier release notes start
 
+5.11.0 (2023-05-13)
+-------------------
+
+Features
+~~~~~~~~
+
+* Add a work-around for pure-python modules that do not specify encoding via
+  :pep:`263` encoding header but contain non-ASCII characters in local
+  (non-UTF8) encoding. When such characters are present only in code comments,
+  python still loads and runs the module, but attempting to retrieve its source
+  code via the loader's ``get_source()`` method results in a
+  :class:`UnicodeDecodeError`, which interrupts the analysis process. The error
+  is now caught and a fall-back codepath attempts to retrieve the source code as
+  raw data to avoid encoding issues. (:issue:`7622`)
+
+
+Bugfix
+~~~~~~
+
+* (Windows) Avoid writing collected binaries to binary cache unless
+  they need to be processed (i.e., only if binary stripping or ``upx``
+  processing is enabled). (:issue:`7595`)
+* Fix a regression in bootloader that caused crash in onefile executables
+  when encountering a duplicated entry in the PKG/CArchive and the
+  ``PYINSTALLER_STRICT_UNPACK_MODE`` environment variable not being set.
+  (:issue:`7613`)
+
+
+Deprecations
+~~~~~~~~~~~~
+
+* The ``TOC`` class is now deprecated; use a plain ``list`` with the same
+  three-element tuples instead. PyInstaller now performs explicit
+  normalization (i.e., entry de-duplication) of the TOC lists passed
+  to the build targets (e.g., ``PYZ``, ``EXE``, ``COLLECT``) during their
+  instantiation. (:issue:`7615`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* Fix bootloader building with old versions of ``gcc`` that do not
+  support the ``-Wno-error=unused-but-set-variable`` compiler flag
+  (e.g., ``gcc`` v4.4.3). (:issue:`7592`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Update the documentation on TOC lists and ``Tree`` class to reflect the
+  deprecation of the ``TOC`` class. (:issue:`7615`)
+
+
+PyInstaller Core
+~~~~~~~~~~~~~~~~
+
+* Remove the use of the ``TOC`` class in the analysis / build process,
+  and use plain ``list`` instances instead. The implicit normalization
+  (de-duplication) of TOC entries performed by the ``TOC`` class has been
+  replaced with explicit normalization. The TOC lists produced by ``Analysis``
+  are explicitly normalized at the end of Analysis instantiation, before
+  they are stored in the Analysis properties (e.g., ``Analysis.pure``,
+  ``Analysis.binaries``, ``Analysis.datas``). Similarly, the TOC lists
+  passed to the build targets (e.g., ``PYZ``, ``EXE``, ``COLLECT``) are
+  explicitly normalized as part of the targets' instantiation process.
+  (:issue:`7615`)
+
+
+5.10.1 (2023-04-14)
+-------------------
+
+Bugfix
+~~~~~~
+
+* Fix regression on platforms with strict data alignment requirements (such as
+  linux on ``armhf``/``armv7``), caused by bug in PKG/CArchive generation that
+  was introduced during the archive writer code cleanup. The regression caused
+  executable to terminate with ``Bus error`` on the affected platforms, such as
+  32-bit Debian Buster on Raspberry Pi 4. (:issue:`7566`)
+
+
+5.10.0 (2023-04-11)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (Linux) Ignore the executable name resolution based on ``/proc/self/exe``
+  when the PyInstaller-frozen executable is launched via the ``ld.so``
+  dynamic loader executable. In such cases, the resolved name points to
+  the ``ld.so`` executable, causing the PyInstaller-frozen executable to
+  fail with *Cannot open PyInstaller archive from executable...* error.
+  (:issue:`7551`)
+* Ensure that binaries that are manually specified in the .spec file (or via
+  corresponding :option:`--add-binary` or :option:`--collect-binaries`
+  command-line switches) undergo the binary dependency analysis, so their
+  dependencies are automatically collected. (:issue:`7522`)
+* Extend the ``excludedimports`` mechanism rework from :issue:`7066`
+  to properly handle relative imports within the package. For example,
+  ensure that ``excludedimports = ['a.b']`` within the hook for package
+  ``a`` takes effect when package ``a`` does ``from . import b`` (in
+  addition to ``from a import b``). (:issue:`7495`)
+* Extend the ``excludedimports`` mechanism rework from :issue:`7066`
+  to properly handle the case of multiple submodules being imported in a
+  single ``from ... import ...`` statement (using absolute or relative import).
+  For example, when package ``c`` does ``from d import e, f``, we need to
+  consider potential ``excludedimports`` rules matching package ``d`` and,
+  if ``d`` itself is not excluded, potential rules individually matching
+  ``d.e`` and ``d.f``. (:issue:`7495`)
+* Fix marshal error in binary dependency search stage, caused by the list of
+  collected packages containing a ``modulegraph.Alias`` instance instead of only
+  plain :class:`str` instances. (:issue:`7515`)
+* Reorganize the ``multiprocessing`` run-time hook to override ``Popen``
+  implementations only for ``spawn`` and ``forkserver`` start methods,
+  but not for the ``fork`` start method. This avoids a dead-lock when
+  attempting to perform nested multiprocessing using the ``fork`` start
+  method, which occurred due to override-provided lock (introduced in
+  :issue:`7411`) being copied in its locked state into the forked
+  sub-process. (:issue:`7494`)
+
+
+Incompatible Changes
+~~~~~~~~~~~~~~~~~~~~
+
+* The ``archive_viewer`` utility has been rewritten with modified
+  command-line interface (``--log`` has been renamed to ``--list``) and
+  with changed output formatting. (:issue:`7518`)
+
+
+Hooks
+~~~~~
+
+* (Windows) Improve support for ``matplotlib >= 3.7.0`` by collecting all
+  ``delvewheel``-generated files from the ``matplotlib.libs`` directory,
+  including the load-order file. This is required when PyPI ``matplotlib``
+  wheels are used in combination with Anaconda python 3.8 and 3.9.
+  (:issue:`7503`)
+* Add hook for ``PyQt6.QtSpatialAudio`` module, which was added in
+  ``PyQt6`` 6.5.0. (:issue:`7549`)
+* Add hook for ``PyQt6.QtTextToSpeech`` module, which was added in
+  ``PyQt6`` 6.4 series. (:issue:`7549`)
+* Extend ``PySide6`` hooks for ``PySide6`` 6.5.0 compatibility: add hooks
+  for ``QtLocation``, ``QtTextToSpeech``, and ``QtSerialBus`` modules
+  that were introduced in ``PySide`` 6.5.0. (:issue:`7549`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Clarify the supported color specification formats and apply consistent
+  formatting of default parameter values in the splash screen documentation.
+  (:issue:`7529`)
+
+
+5.9.0 (2023-03-13)
+------------------
+
+Features
+~~~~~~~~
+
+* Choose :ref:`hooks provided by packages <provide hooks with package>` over
+  hooks from
+  `pyinstaller-hooks-contrib <https://github.com/pyinstaller/pyinstaller-hooks-contrib/>`_
+  if both provide the same hook. (:issue:`7456`)
+
+
+Bugfix
+~~~~~~
+
+* Fix changes to :data:`sys.path` made in the spec file being ignored by hook
+  utility functions (e.g. :func:`~PyInstaller.utils.hooks.collect_submodules`).
+  (:issue:`7456`)
+
+
 5.8.0 (2023-02-11)
 ------------------
 

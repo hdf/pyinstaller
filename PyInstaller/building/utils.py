@@ -147,16 +147,11 @@ def checkCache(
     """
     from PyInstaller.config import CONF
 
-    # On Mac OS, a cache is required anyway to keep the libraries with relative install names.
-    # Caching on Mac OS does not work since we need to modify binary headers to use relative paths to dll dependencies
-    # and starting with '@loader_path'.
-    if not strip and not upx and not is_darwin and not is_win:
-        return fnm
-
-    if strip:
-        strip = True
-    else:
-        strip = False
+    # Binding redirects should be taken into account to see if the file needs to be reprocessed. The redirects may
+    # change if the versions of dependent manifests change due to system updates.
+    redirects = CONF.get('binding_redirects', [])
+    # optionally change manifest to private assembly
+    win_private_assemblies = CONF.get('win_private_assemblies', False)
 
     # Disable UPX on non-Windows. Using UPX (3.96) on modern Linux shared libraries (for example, the python3.x.so
     # shared library) seems to result in segmentation fault when they are dlopen'd. This happens in recent versions
@@ -164,6 +159,12 @@ def checkCache(
     # UnknownExecutableFormatException on most .dylibs (and interferes with code signature on other occasions). And
     # even when it would succeed, compressed libraries cannot be (re)signed due to failed strict validation.
     upx = upx and (is_win or is_cygwin)
+
+    # On Mac OS, a cache is required anyway to keep the libraries with relative install names.
+    # Caching on Mac OS does not work since we need to modify binary headers to use relative paths to dll dependencies
+    # and starting with '@loader_path'.
+    if not strip and not upx and not is_darwin and not (is_win and (redirects or win_private_assemblies)):
+        return fnm
 
     # Match against provided UPX exclude patterns.
     upx_exclude = upx_exclude or []
@@ -222,9 +223,6 @@ def checkCache(
     else:
         basenm = os.path.normcase(os.path.basename(fnm))
 
-    # Binding redirects should be taken into account to see if the file needs to be reprocessed. The redirects may
-    # change if the versions of dependent manifests change due to system updates.
-    redirects = CONF.get('binding_redirects', [])
     digest = cacheDigest(fnm, redirects)
     cachedfile = os.path.join(cachedir, basenm)
     cmd = None
@@ -292,6 +290,7 @@ def checkCache(
 
     if not os.path.exists(os.path.dirname(cachedfile)):
         os.makedirs(os.path.dirname(cachedfile))
+
     # There are known some issues with 'shutil.copy2' on Mac OS 10.11 with copying st_flags. Issue #1650.
     # 'shutil.copy' copies also permission bits and it should be sufficient for PyInstaller's purposes.
     shutil.copy(fnm, cachedfile)
@@ -331,9 +330,7 @@ def checkCache(
                             logger.error("Cannot parse manifest resource %s, =%s", name, language)
                             logger.error("From file %s", cachedfile, exc_info=1)
                         else:
-                            # optionally change manifest to private assembly
-                            private = CONF.get('win_private_assemblies', False)
-                            if private:
+                            if win_private_assemblies:
                                 if manifest.publicKeyToken:
                                     logger.info("Changing %s into a private assembly", os.path.basename(fnm))
                                 manifest.publicKeyToken = None
@@ -344,7 +341,7 @@ def checkCache(
                                     if dep.name != "Microsoft.Windows.Common-Controls":
                                         dep.publicKeyToken = None
                             redirecting = applyRedirects(manifest, redirects)
-                            if redirecting or private:
+                            if redirecting or win_private_assemblies:
                                 try:
                                     manifest.update_resources(os.path.abspath(cachedfile), [name], [language])
                                 except Exception:
@@ -741,3 +738,68 @@ def compile_pymodule(name, src_path, workpath, code_cache=None):
 
     # Return output path
     return pyc_path
+
+
+def postprocess_binaries_toc_pywin32(binaries):
+    """
+    Process the given `binaries` TOC list to apply work around for `pywin32` package, fixing the target directory
+    for collected extensions.
+    """
+    # Ensure that all files collected from `win32`  or `pythonwin` into top-level directory are put back into
+    # their corresponding directories. They end up in top-level directory because `pywin32.pth` adds both
+    # directories to the `sys.path`, so they end up visible as top-level directories. But these extensions
+    # might in fact be linked against each other, so we should preserve the directory layout for consistency
+    # between modulegraph-discovered extensions and linked binaries discovered by link-time dependency analysis.
+    # Within the same framework, also consider `pywin32_system32`, just in case.
+    PYWIN32_SUBDIRS = {'win32', 'pythonwin', 'pywin32_system32'}
+
+    processed_binaries = []
+    for dest_name, src_name, typecode in binaries:
+        dest_path = pathlib.PurePath(dest_name)
+        src_path = pathlib.PurePath(src_name)
+
+        if dest_path.parent == pathlib.PurePath('.') and src_path.parent.name.lower() in PYWIN32_SUBDIRS:
+            dest_path = pathlib.PurePath(src_path.parent.name) / dest_path
+            dest_name = str(dest_path)
+
+        processed_binaries.append((dest_name, src_name, typecode))
+
+    return processed_binaries
+
+
+def postprocess_binaries_toc_pywin32_anaconda(binaries):
+    """
+    Process the given `binaries` TOC list to apply work around for Anaconda `pywin32` package, fixing the location
+    of collected `pywintypes3X.dll` and `pythoncom3X.dll`.
+    """
+    # The Anaconda-provided `pywin32` package installs three copies of `pywintypes3X.dll` and `pythoncom3X.dll`,
+    # located in the following directories (relative to the environment):
+    # - Library/bin
+    # - Lib/site-packages/pywin32_system32
+    # - Lib/site-packages/win32
+    #
+    # This turns our dependency scanner and directory layout preservation mechanism into a lottery based on what
+    # `pywin32` modules are imported and in what order. To keep things simple, we deal with this insanity by
+    # post-processing the `binaries` list, modifying the destination of offending copies, and let the final TOC
+    # list normalization deal with potential duplicates.
+    DLL_CANDIDATES = {
+        f"pywintypes{sys.version_info[0]}{sys.version_info[1]}.dll",
+        f"pythoncom{sys.version_info[0]}{sys.version_info[1]}.dll",
+    }
+
+    DUPLICATE_DIRS = {
+        pathlib.PurePath('.'),
+        pathlib.PurePath('win32'),
+    }
+
+    processed_binaries = []
+    for dest_name, src_name, typecode in binaries:
+        # Check if we need to divert - based on the destination base name and destination parent directory.
+        dest_path = pathlib.PurePath(dest_name)
+        if dest_path.name.lower() in DLL_CANDIDATES and dest_path.parent in DUPLICATE_DIRS:
+            dest_path = pathlib.PurePath("pywin32_system32") / dest_path.name
+            dest_name = str(dest_path)
+
+        processed_binaries.append((dest_name, src_name, typecode))
+
+    return processed_binaries
