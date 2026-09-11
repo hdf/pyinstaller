@@ -11,7 +11,7 @@
 
 import pytest
 
-from PyInstaller.utils.tests import importorskip
+from PyInstaller.utils.tests import importorskip, onedir_only
 from PyInstaller.utils.hooks import can_import_module
 
 
@@ -106,7 +106,7 @@ from PyInstaller.utils.hooks import can_import_module
         'pythoncom',
     )
 )
-@pytest.mark.parametrize('pyi_builder', ['onedir'], indirect=True)  # Run only in onedir mode.
+@onedir_only
 def test_pywin32_imports(pyi_builder, module):
     if not can_import_module(module):
         pytest.skip(f"Module '{module}' cannot be imported.")
@@ -115,3 +115,44 @@ def test_pywin32_imports(pyi_builder, module):
     pyi_builder.test_source(f"""
         import {module}
         """)
+
+
+@importorskip('win32com')
+def test_pywin32_win32com(pyi_builder):
+    pyi_builder.test_source(
+        """
+        # Test importing some modules from pywin32 package.
+        # All modules from pywin32 depens on module pywintypes.
+        # This module should be also included.
+        import win32com
+        import win32com.client
+        import win32com.server
+        """
+    )
+
+
+@importorskip('win32com')
+def test_pywin32_comext(pyi_builder):
+    pyi_builder.test_source(
+        """
+        # Test importing modules from win32com that are actually present in
+        # win32comext, and made available by __path__ changes in win32com.
+        from win32com.shell import shell
+        from win32com.propsys import propsys
+        from win32com.bits import bits
+        """
+    )
+
+
+@importorskip('win32ui')
+def test_pywin32_win32ui(pyi_builder):
+    pyi_builder.test_source(
+        """
+        # Test importing some modules from pywin32 package.
+        # All modules from pywin32 depens on module pywintypes.
+        # This module should be also included.
+        import win32ui
+        from pywin.mfc.dialog import Dialog
+        d = Dialog(win32ui.IDD_SIMPLE_INPUT)
+        """
+    )

@@ -12,6 +12,13 @@
 import argparse
 import codecs
 
+try:
+    from argcomplete import autocomplete
+except ImportError:
+
+    def autocomplete(parser):
+        return None
+
 
 def run():
     parser = argparse.ArgumentParser(
@@ -33,13 +40,14 @@ def run():
         help="filename where the grabbed version info will be saved",
     )
 
+    autocomplete(parser)
     args = parser.parse_args()
 
     try:
         from PyInstaller.utils.win32 import versioninfo
         info = versioninfo.read_version_info_from_executable(args.exe_file)
         if not info:
-            raise SystemExit("Error: VersionInfo resource not found in exe")
+            raise SystemExit("ERROR: VersionInfo resource not found in exe")
         with codecs.open(args.out_filename, 'w', 'utf-8') as fp:
             fp.write(str(info))
         print(f"Version info written to: {args.out_filename!r}")

@@ -22,10 +22,38 @@ import platform
 import site
 import subprocess
 import sys
+import sysconfig
 import shutil
+import types
 
 from PyInstaller._shared_with_waf import _pyi_machine
 from PyInstaller.exceptions import ExecCommandFailed
+
+# hatch_build.py sets this environment variable to avoid errors due to unmet run-time dependencies. The
+# PyInstaller.compat module is imported by hatch_build.py to build wheels, and some dependencies that are otherwise
+# required at run-time (importlib-metadata on python < 3.10, pywin32-ctypes on Windows) might not be present while
+# building wheels, nor are they required during that phase.
+_setup_py_mode = os.environ.get('_PYINSTALLER_SETUP', '0') != '0'
+
+# PyInstaller requires importlib.metadata from python >= 3.10 stdlib, or equivalent importlib-metadata >= 4.6.
+if _setup_py_mode:
+    importlib_metadata = None
+else:
+    if sys.version_info >= (3, 10):
+        import importlib.metadata as importlib_metadata
+    else:
+        try:
+            import importlib_metadata
+        except ImportError as e:
+            from PyInstaller.exceptions import ImportlibMetadataError
+            raise ImportlibMetadataError() from e
+
+        import packaging.version  # For importlib_metadata version check
+
+        # Validate the version
+        if packaging.version.parse(importlib_metadata.version("importlib-metadata")) < packaging.version.parse("4.6"):
+            from PyInstaller.exceptions import ImportlibMetadataError
+            raise ImportlibMetadataError()
 
 # Strict collect mode, which raises error when trying to collect duplicate files into PKG/CArchive or COLLECT.
 strict_collect_mode = os.environ.get("PYINSTALLER_STRICT_COLLECT_MODE", "0") != "0"
@@ -42,28 +70,41 @@ is_py38 = sys.version_info >= (3, 8)
 is_py39 = sys.version_info >= (3, 9)
 is_py310 = sys.version_info >= (3, 10)
 is_py311 = sys.version_info >= (3, 11)
+is_py312 = sys.version_info >= (3, 12)
+is_py313 = sys.version_info >= (3, 13)
+is_py314 = sys.version_info >= (3, 14)
+is_py315 = sys.version_info >= (3, 15)
 
 is_win = sys.platform.startswith('win')
 is_win_10 = is_win and (platform.win32_ver()[0] == '10')
+is_win_11 = is_win and (platform.win32_ver()[0] == '11')
 is_win_wine = False  # Running under Wine; determined later on.
 is_cygwin = sys.platform == 'cygwin'
-is_darwin = sys.platform == 'darwin'  # Mac OS X
+is_darwin = sys.platform == 'darwin'  # macOS
 
 # Unix platforms
-is_linux = sys.platform.startswith('linux')
+is_android = sys.platform.startswith('android')
+is_linux = sys.platform.startswith('linux') or is_android  # For our intents and purposes, Android is also Linux.
 is_solar = sys.platform.startswith('sun')  # Solaris
 is_aix = sys.platform.startswith('aix')
 is_freebsd = sys.platform.startswith('freebsd')
 is_openbsd = sys.platform.startswith('openbsd')
+is_netbsd = sys.platform.startswith('netbsd')
 is_hpux = sys.platform.startswith('hp-ux')
 
 # Some code parts are similar to several unix platforms (e.g. Linux, Solaris, AIX).
-# Mac OS is not considered as unix since there are many platform-specific details for Mac in PyInstaller.
-is_unix = is_linux or is_solar or is_aix or is_freebsd or is_hpux or is_openbsd
+# macOS is not considered as unix since there are many platform-specific details for Mac in PyInstaller.
+is_unix = is_linux or is_solar or is_aix or is_freebsd or is_hpux or is_openbsd or is_netbsd
 
 # Linux distributions such as Alpine or OpenWRT use musl as their libc implementation and resultantly need specially
 # compiled bootloaders. On musl systems, ldd with no arguments prints 'musl' and its version.
-is_musl = is_linux and "musl" in subprocess.getoutput(["ldd"])
+is_musl = is_linux and "musl" in subprocess.run(["ldd"], capture_output=True, encoding="utf-8").stderr
+
+# Termux - terminal emulator and Linux environment app for Android.
+# With python >= 3.13, this could also be directly inferred from `sys.platform` or `platform.system()` (see PEP-738),
+# and `is_android` will also be set to True; this is not the case with earlier python versions (that people might still
+# have installed in their Termux environments), so for now, we keep the legacy check.
+is_termux = is_linux and hasattr(sys, 'getandroidapilevel')
 
 # macOS version
 _macos_ver = tuple(int(x) for x in platform.mac_ver()[0].split('.')) if is_darwin else None
@@ -81,59 +122,15 @@ is_macos_11_compat = bool(_macos_ver) and _macos_ver[0:2] == (10, 16)  # Big Sur
 is_macos_11_native = bool(_macos_ver) and _macos_ver[0:2] >= (11, 0)  # Big Sur or newer in native mode
 is_macos_11 = is_macos_11_compat or is_macos_11_native  # Big Sur or newer
 
-# On different platforms is different file for dynamic python library.
-# TODO: When removing support for is_py37, the "m" variants can be
-# removed, see <https://docs.python.org/3/whatsnew/3.8.html#build-and-c-api-changes>
-_pyver = sys.version_info[:2]
-if is_win or is_cygwin:
-    PYDYLIB_NAMES = {
-        'python%d%d.dll' % _pyver,
-        'libpython%d%d.dll' % _pyver,
-        'libpython%d%dm.dll' % _pyver,
-        'libpython%d.%d.dll' % _pyver,
-        'libpython%d.%dm.dll' % _pyver
-    }  # For MSYS2 environment
-elif is_darwin:
-    # libpython%d.%dm.dylib for Conda virtual environment installations
-    PYDYLIB_NAMES = {
-        'Python', '.Python',
-        'Python%d' % _pyver[0],
-        'libpython%d.%d.dylib' % _pyver,
-        'libpython%d.%dm.dylib' % _pyver
-    }
-elif is_aix:
-    # Shared libs on AIX may be archives with shared object members, hence the ".a" suffix. However, starting with
-    # python 2.7.11 libpython?.?.so and Python3 libpython?.?m.so files are produced.
-    PYDYLIB_NAMES = {
-        'libpython%d.%d.a' % _pyver,
-        'libpython%d.%dm.a' % _pyver,
-        'libpython%d.%d.so' % _pyver,
-        'libpython%d.%dm.so' % _pyver
-    }
-elif is_freebsd:
-    PYDYLIB_NAMES = {
-        'libpython%d.%d.so.1' % _pyver,
-        'libpython%d.%dm.so.1' % _pyver,
-        'libpython%d.%d.so.1.0' % _pyver,
-        'libpython%d.%dm.so.1.0' % _pyver
-    }
-elif is_openbsd:
-    PYDYLIB_NAMES = {'libpython%d.%d.so.0.0' % _pyver, 'libpython%d.%dm.so.0.0' % _pyver}
-elif is_hpux:
-    PYDYLIB_NAMES = {'libpython%d.%d.so' % _pyver}
-elif is_unix:
-    # Other *nix platforms.
-    # Python 2 .so library on Linux is: libpython2.7.so.1.0
-    # Python 3 .so library on Linux is: libpython3.2mu.so.1.0, libpython3.3m.so.1.0
-    PYDYLIB_NAMES = {
-        'libpython%d.%d.so.1.0' % _pyver,
-        'libpython%d.%dm.so.1.0' % _pyver,
-        'libpython%d.%dmu.so.1.0' % _pyver,
-        'libpython%d.%dm.so' % _pyver,
-        'libpython%d.%d.so' % _pyver
-    }
-else:
-    raise SystemExit('Your platform is not yet supported. Please define constant PYDYLIB_NAMES for your platform.')
+# Check if python >= 3.13 was built with Py_GIL_DISABLED / free-threading (PEP703).
+#
+# This affects the shared library name, which has the "t" ABI suffix, as per:
+# https://github.com/python/steering-council/issues/221#issuecomment-1841593283
+#
+# It also affects the layout of PyConfig structure used by bootloader; consequently we need to inform bootloader what
+# kind of build it is dealing with (only in python 3.13; with 3.14 and later, we use PEP741 configuration API in the
+# bootloader, and do not need to know the layout of PyConfig structure anymore)
+is_nogil = bool(sysconfig.get_config_var('Py_GIL_DISABLED'))
 
 # In a virtual environment created by virtualenv (github.com/pypa/virtualenv) there exists sys.real_prefix with the path
 # to the base Python installation from which the virtual environment was created. This is true regardless of the version
@@ -169,7 +166,7 @@ if is_ms_app_store:
     python_executable = os.path.join(base_prefix, os.path.basename(python_executable))
     if not os.path.exists(python_executable):
         raise SystemExit(
-            'PyInstaller cannot locate real python executable belonging to Python from Microsoft App Store!'
+            'ERROR: PyInstaller cannot locate real python executable belonging to Python from Microsoft App Store!'
         )
 
 # Bytecode magic value
@@ -183,26 +180,35 @@ ALL_SUFFIXES = importlib.machinery.all_suffixes()
 # -> all pyinstaller modules should use win32api from PyInstaller.compat to
 #    ensure that it can work on MSYS2 (which requires pywin32-ctypes)
 if is_win:
-    try:
-        from win32ctypes.pywin32 import pywintypes  # noqa: F401, E402
-        from win32ctypes.pywin32 import win32api  # noqa: F401, E402
-    except ImportError:
-        # This environment variable is set by setup.py
-        # - It's not an error for pywin32 to not be installed at that point
-        if not os.environ.get('PYINSTALLER_NO_PYWIN32_FAILURE'):
+    if _setup_py_mode:
+        pywintypes = None
+        win32api = None
+    else:
+        try:
+            # Hide the `cffi` package from win32-ctypes by temporarily blocking its import. This ensures that `ctypes`
+            # backend is always used, even if `cffi` is available. The `cffi` backend uses `pycparser`, which is
+            # incompatible with -OO mode (2nd optimization level) due to its removal of docstrings.
+            # See https://github.com/pyinstaller/pyinstaller/issues/6345
+            # On the off chance that `cffi` has already been imported, store the `sys.modules` entry so we can restore
+            # it after importing `pywin32-ctypes` modules.
+            orig_cffi = sys.modules.get('cffi')
+            sys.modules['cffi'] = None
+
+            from win32ctypes.pywin32 import pywintypes  # noqa: F401, E402
+            from win32ctypes.pywin32 import win32api  # noqa: F401, E402
+        except ImportError as e:
             raise SystemExit(
-                'PyInstaller cannot check for assembly dependencies.\n'
-                'Please install pywin32-ctypes.\n\n'
+                'ERROR: Could not import `pywintypes` or `win32api` from `win32ctypes.pywin32`.\n'
+                'Please make sure that `pywin32-ctypes` is installed and importable, for example:\n\n'
                 'pip install pywin32-ctypes\n'
-            )
-    except Exception:
-        if sys.flags.optimize == 2:
-            raise SystemExit(
-                "pycparser, a Windows only indirect dependency of PyInstaller, is incompatible with "
-                "Python's \"discard docstrings\" (-OO) flag mode. For more information see:\n"
-                "    https://github.com/pyinstaller/pyinstaller/issues/6345"
-            )
-        raise
+            ) from e
+        finally:
+            # Unblock `cffi`.
+            if orig_cffi is not None:
+                sys.modules['cffi'] = orig_cffi
+            else:
+                del sys.modules['cffi']
+            del orig_cffi
 
 # macOS's platform.architecture() can be buggy, so we do this manually here. Based off the python documentation:
 # https://docs.python.org/3/library/platform.html#platform.architecture
@@ -214,9 +220,17 @@ else:
 # Cygwin needs special handling, because platform.system() contains identifiers such as MSYS_NT-10.0-19042 and
 # CYGWIN_NT-10.0-19042 that do not fit PyInstaller's OS naming scheme. Explicitly set `system` to 'Cygwin'.
 system = 'Cygwin' if is_cygwin else platform.system()
+# Similarly, fold Android (reported by python >= 3.13 in Termux environment) back into Linux.
+if system == 'Android':
+    system = 'Linux'
 
 # Machine suffix for bootloader.
-machine = _pyi_machine(platform.machine(), platform.system())
+if is_win:
+    # On Windows ARM64 using an x64 Python environment, platform.machine() returns ARM64 but
+    # we really want the bootloader that matches the Python environment instead of the OS.
+    machine = _pyi_machine(os.environ.get("PROCESSOR_ARCHITECTURE", platform.machine()), platform.system())
+else:
+    machine = _pyi_machine(platform.machine(), platform.system())
 
 
 # Wine detection and support
@@ -295,15 +309,11 @@ def exec_command(
     .. DANGER::
        **Ignore this function's return value** -- unless this command's standard output contains _only_ pathnames, in
        which case this function returns the correct filesystem-encoded string expected by PyInstaller. In all other
-       cases, this function's return value is _not_ safely usable. Consider calling the general-purpose
-       `exec_command_stdout()` function instead.
+       cases, this function's return value is _not_ safely usable.
 
        For backward compatibility, this function's return value non-portably depends on the current Python version and
        passed keyword arguments:
 
-       * Under Python 2.7, this value is an **encoded `str` string** rather than a decoded `unicode` string. This value
-         _cannot_ be safely used for any purpose (e.g., string manipulation or parsing), except to be passed directly to
-         another non-Python command.
        * Under Python 3.x, this value is a **decoded `str` string**. However, even this value is _not_ necessarily
          safely usable:
          * If the `encoding` parameter is passed, this value is guaranteed to be safely usable.
@@ -345,7 +355,7 @@ def exec_command(
         print("Error running '%s':" % " ".join(cmdargs), file=sys.stderr)
         print(e, file=sys.stderr)
         print('--' * 20, file=sys.stderr)
-        raise ExecCommandFailed("Error: Executing command failed!") from e
+        raise ExecCommandFailed("ERROR: Executing command failed!") from e
     except subprocess.TimeoutExpired:
         proc.kill()
         raise
@@ -395,61 +405,13 @@ def exec_command_rc(*cmdargs: str, **kwargs: float | bool | list | None):
     return subprocess.call(cmdargs, **kwargs)
 
 
-def exec_command_stdout(
-    *command_args: str, encoding: str | None = None, **kwargs: float | str | bytes | bool | list | None
-):
-    """
-    Capture and return the standard output of the command specified by the passed positional arguments, optionally
-    configured by the passed keyword arguments.
-
-    Unlike the legacy `exec_command()` and `exec_command_all()` functions, this modern function is explicitly designed
-    for cross-platform portability. The return value may be safely used for any purpose, including string manipulation
-    and parsing.
-
-    .. NOTE::
-       If this command's standard output contains _only_ pathnames, this function does _not_ return the correct
-       filesystem-encoded string expected by PyInstaller. If this is the case, consider calling the filesystem-specific
-       `exec_command()` function instead.
-
-    Parameters
-    ----------
-    command_args : List[str]
-        Variadic list whose:
-        1. Mandatory first element is the absolute path, relative path, or basename in the current `${PATH}` of the
-           command to run.
-        2. Optional remaining elements are arguments to pass to this command.
-    encoding : str, optional
-        Optional name of the encoding with which to decode this command's standard output (e.g., `utf8`), passed as a
-        keyword argument. If unpassed , this output will be decoded in a portable manner specific to to the current
-        platform, shell environment, and system settings with Python's built-in `universal_newlines` functionality.
-
-    All remaining keyword arguments are passed as is to the `subprocess.check_output()` function.
-
-    Returns
-    ----------
-    str
-        Unicode string of this command's standard output decoded according to the "encoding" keyword argument.
-    """
-
-    # If no encoding was specified, the current locale is defaulted to. Else, an encoding was specified. To ensure this
-    # encoding is respected, the "universal_newlines" option is disabled if also passed. Nice, eh?
-    kwargs['universal_newlines'] = encoding is None
-
-    # Standard output captured from this command as a decoded Unicode string if "universal_newlines" is enabled or an
-    # encoded byte array otherwise.
-    stdout = subprocess.check_output(command_args, **kwargs)
-
-    # Return a Unicode string, decoded from this encoded byte array if needed.
-    return stdout if encoding is None else stdout.decode(encoding)
-
-
 def exec_command_all(*cmdargs: str, encoding: str | None = None, **kwargs: int | bool | list | None):
     """
     Run the command specified by the passed positional arguments, optionally configured by the passed keyword arguments.
 
     .. DANGER::
        **Ignore this function's return value.** If this command's standard output consists solely of pathnames, consider
-       calling `exec_command()`; otherwise, consider calling `exec_command_stdout()`.
+       calling `exec_command()`
 
     Parameters
     ----------
@@ -505,7 +467,7 @@ def exec_command_all(*cmdargs: str, encoding: str | None = None, **kwargs: int |
 def __wrap_python(args, kwargs):
     cmdargs = [sys.executable]
 
-    # Mac OS X supports universal binaries (binary for multiple architectures. We need to ensure that subprocess
+    # macOS supports universal binaries (binary for multiple architectures. We need to ensure that subprocess
     # binaries are running for the same architecture as python executable. It is necessary to run binaries with 'arch'
     # command.
     if is_darwin:
@@ -518,7 +480,7 @@ def __wrap_python(args, kwargs):
             py_prefix = ['arch', '-i386']
         else:
             py_prefix = []
-        # Since Mac OS 10.11, the environment variable DYLD_LIBRARY_PATH is no more inherited by child processes, so we
+        # Since macOS 10.11, the environment variable DYLD_LIBRARY_PATH is no more inherited by child processes, so we
         # proactively propagate the current value using the `-e` option of the `arch` command.
         if 'DYLD_LIBRARY_PATH' in os.environ:
             path = os.environ['DYLD_LIBRARY_PATH']
@@ -565,14 +527,6 @@ def exec_python_rc(*args: str, **kwargs: str | None):
 # Path handling.
 
 
-def expand_path(path: str | os.PathLike):
-    """
-    Replace initial tilde '~' in path with user's home directory, and also expand environment variables
-    (i.e., ${VARNAME} on Unix, %VARNAME% on Windows).
-    """
-    return os.path.expandvars(os.path.expanduser(path))
-
-
 # Site-packages functions - use native function if available.
 def getsitepackages(prefixes: list | None = None):
     """
@@ -609,7 +563,10 @@ getsitepackages = getattr(site, 'getsitepackages', getsitepackages)
 def importlib_load_source(name: str, pathname: str):
     # Import module from a file.
     mod_loader = importlib.machinery.SourceFileLoader(name, pathname)
-    return mod_loader.load_module()
+    mod = types.ModuleType(mod_loader.name)
+    mod.__file__ = mod_loader.get_filename()  # Some hooks require __file__ attribute in their namespace
+    mod_loader.exec_module(mod)
+    return mod
 
 
 # Patterns of module names that should be bundled into the base_library.zip to be available during bootstrap.
@@ -626,10 +583,9 @@ PY3_BASE_MODULES = {
     'copyreg',
     'encodings',
     'enum',
-    'fnmatch',  # dependency of pathlib
     'functools',
     'genericpath',  # dependency of os.path
-    'io',  # used by loader/pymod02_importers.py
+    'io',
     'heapq',
     'keyword',
     'linecache',
@@ -637,25 +593,27 @@ PY3_BASE_MODULES = {
     'ntpath',  # dependency of os.path
     'operator',
     'os',
-    'pathlib',  # used by loader/pymod02_importers.py
     'posixpath',  # dependency of os.path
     're',
     'reprlib',
-    'sre_compile',
-    'sre_constants',
-    'sre_parse',
     'stat',  # dependency of os.path
-    'token',  # depdendency of tokenize
-    'tokenize',  # used by loader/pymod02_importers.py
     'traceback',  # for startup errors
     'types',
-    'urllib',  # dependency of pathlib
     'weakref',
     'warnings',
 }
 
 if not is_py310:
     PY3_BASE_MODULES.add('_bootlocale')
+
+if is_android and is_py313:
+    PY3_BASE_MODULES.add('_android_support')
+    PY3_BASE_MODULES.add('threading')  # dependency of _android_support
+
+if not is_py315:
+    PY3_BASE_MODULES.add('sre_compile')
+    PY3_BASE_MODULES.add('sre_constants')
+    PY3_BASE_MODULES.add('sre_parse')
 
 # Object types of Pure Python modules in modulegraph dependency graph.
 # Pure Python modules have code object (attribute co_code).
@@ -672,7 +630,9 @@ PURE_PYTHON_MODULE_TYPES = {
 # Object types of special Python modules (built-in, run-time, namespace package) in modulegraph dependency graph that do
 # not have code object.
 SPECIAL_MODULE_TYPES = {
-    'AliasNode',
+    # Omit AliasNode from here (and consequently from VALID_MODULE_TYPES), in order to prevent PyiModuleGraph from
+    # running standard hooks for aliased modules.
+    #'AliasNode',
     'BuiltinModule',
     'RuntimeModule',
     'RuntimePackage',
@@ -740,16 +700,19 @@ def check_requirements():
     Fail hard if any requirement is not met.
     """
     # Fail hard if Python does not have minimum required version
-    if sys.version_info < (3, 7):
-        raise EnvironmentError('PyInstaller requires at Python 3.7 or newer.')
+    if sys.version_info < (3, 8):
+        raise EnvironmentError('PyInstaller requires Python 3.8 or newer.')
+
+    if sys.implementation.name != "cpython":
+        raise SystemExit(f"ERROR: PyInstaller does not support {sys.implementation.name}. Only CPython is supported.")
+
+    if getattr(sys, "frozen", False):
+        raise SystemExit("ERROR: PyInstaller can not be ran on itself")
 
     # There are some old packages which used to be backports of libraries which are now part of the standard library.
     # These backports are now unmaintained and contain only an older subset of features leading to obscure errors like
     # "enum has not attribute IntFlag" if installed.
-    if is_py38:
-        from importlib.metadata import distribution, PackageNotFoundError
-    else:
-        from importlib_metadata import distribution, PackageNotFoundError
+    from importlib.metadata import distribution, PackageNotFoundError
 
     for name in ["enum34", "typing", "pathlib"]:
         try:
@@ -758,14 +721,14 @@ def check_requirements():
             continue
         remove = "conda remove" if is_conda else f'"{sys.executable}" -m pip uninstall {name}'
         raise SystemExit(
-            f"The '{name}' package is an obsolete backport of a standard library package and is incompatible with "
-            f"PyInstaller. Please remove this package (located in {dist.locate_file('')}) using\n    {remove}\n"
+            f"ERROR: The '{name}' package is an obsolete backport of a standard library package and is incompatible "
+            f"with PyInstaller. Please remove this package (located in {dist.locate_file('')}) using\n    {remove}\n"
             "then try again."
         )
 
     # Bail out if binutils is not installed.
     if is_linux and shutil.which("objdump") is None:
         raise SystemExit(
-            "On Linux, objdump is required. It is typically provided by the 'binutils' package "
+            "ERROR: On Linux, objdump is required. It is typically provided by the 'binutils' package "
             "installable via your Linux distribution's package manager."
         )

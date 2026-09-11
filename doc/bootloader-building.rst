@@ -4,37 +4,82 @@
 Building the Bootloader
 =========================
 
-PyInstaller comes with pre-compiled bootloaders for some platforms in
-the ``bootloader`` folder of the distribution folder.
-When there is no pre-compiled bootloader for
-the current platform (operating-system and word-size),
-the pip_ setup will attempt to build one.
+PyInstaller comes with pre-compiled bootloader executables for
+commonly-used platforms. These executables are located in the
+``bootloader`` directory inside the source distribution directory,
+and are updated (rebuild) as necessary before every PyInstaller release.
+When pre-compiled bootloader executables are not available for the
+current platform (w.r.t. operating system and word-size), the package
+installation process (usually pip_ setup) will attempt to build the
+bootloader from source.
 
-If there is no precompiled bootloader for your platform,
-or if you want to modify the bootloader source,
-you need to build the bootloader.
-To do this,
+You might, however, want to build the bootloader yourself, despite the
+pre-compiled version being available for your target platform. There
+are various reasons why one might to do that, including:
 
-* Download and install Python, which is required for running :command:`waf`,
-* `git clone` or download the source from our `GitHub repository`_,
-* ``cd`` into the folder where you cloned or unpacked the source to,
+* you need to modify the bootloader's behavior in some way that
+  is specific to your application
+
+* you want to avoid anti-virus false positives that result from the
+  wide-spread use of pre-compiled bootloaders
+
+* you want to enable (or disable) a particular option exposed via the
+  bootloader's build system
+
+* you want to build with specific compiler toolchain
+
+The first two sub-sections below provide steps for **building and installing
+the bootloader from source distribution** and for **forcing bootloader
+to be rebuild as part of package installation**. The rest of sub-sections
+provide details for individual platforms.
+
+The officially supported platforms are:
+
+* GNU/Linux (using gcc)
+* Windows (using Visual C++ (VS2017 or later) or MinGW's gcc)
+* macOS (using clang)
+
+Contributed platforms are:
+
+* AIX (using gcc or xlc)
+* HP-UX  (using gcc or xlc)
+* Solaris
+
+For more information about cross-building, please read on
+and mind the section about the virtual machines
+provided in the Vagrantfile.
+
+
+Building and installing bootloader from source distribution or repository checkout
+==================================================================================
+
+To build (and install) bootloader from source distribution or repository
+checkout, follow these steps:
+
+* download and install Python, which is required for running :command:`waf`,
+
+* ``git clone`` or download the source from our `GitHub repository`_,
+* ``cd`` into the directory where you cloned the repository or unpacked the source,
 * ``cd bootloader``, and
-* make the bootloader with: ``python ./waf all``,
-* test the build by ref:`running (parts of) the test-suite
+* build the bootloader by running: ``python ./waf all``,
+* install the PyInstaller with rebuilt bootloader; first, change back
+  to the parent (top-level) directory: ``cd ..``, and
+* run ``pip install .`` or ``pip install -e .`` (for editable install)
+* test the build by :ref:`running (parts of) the test-suite
   <running-the-test-suite>`.
 
 This will produce the bootloader executables for your current platform
-(of course, for Windows these files will have the ``.exe`` extension):
+(on Windows, these files will have the ``.exe`` extension):
 
-* :file:`../PyInstaller/bootloader/{OS_ARCH}/run`,
-* :file:`../PyInstaller/bootloader/{OS_ARCH}/run_d`,
-* :file:`../PyInstaller/bootloader/{OS_ARCH}/runw` (macOS and Windows only), and
-* :file:`../PyInstaller/bootloader/{OS_ARCH}/runw_d` (macOS and Windows only).
+* :file:`PyInstaller/bootloader/{OS_ARCH}/run`,
+* :file:`PyInstaller/bootloader/{OS_ARCH}/run_d`,
+* :file:`PyInstaller/bootloader/{OS_ARCH}/runw` (macOS and Windows only), and
+* :file:`PyInstaller/bootloader/{OS_ARCH}/runw_d` (macOS and Windows only).
 
-The bootloaders architecture defaults to the machine's one, but can be changed
-using the :option:`--target-arch` option – given the appropriate compiler and
-development files are installed. E.g. to build a 32-bit bootloader on a 64-bit
-machine, run::
+The bootloader's architecture defaults to the machine's one, but can be changed
+using the ``--target-arch`` option – given the appropriate compiler and
+development files are installed. For example, to build a 32-bit bootloader on
+a 64-bit machine, run::
 
   python ./waf all --target-arch=32bit
 
@@ -42,25 +87,69 @@ machine, run::
 If this reports an error, read the detailed notes that follow,
 then ask for technical help.
 
-By setting the environment variable ``PYINSTALLER_COMPILE_BOOTLOADER``
-the pip_ setup will attempt to build the bootloader for your platform, even
-if it is already present.
 
-Supported platforms are
+Forcing bootloader rebuild as part of package installation
+==========================================================
 
-* GNU/Linux (using gcc)
-* Windows (using Visual C++ (VS2015 or later) or MinGW's gcc)
-* Mac OX X (using clang)
+Instead of performing manual steps from the previous section, it is also
+possible to force bootloader to be rebuild when installing PyInstaller
+directly through `pip`_. This alternative might prove especially useful
+in setting up automated build pipelines.
 
-Contributed platforms are
+To force bootloader to be rebuilt during PyInstaller package installation, set the
+``PYINSTALLER_COMPILE_BOOTLOADER`` environment variable (to any value)
+before running `pip`_. This will cause the installation process to (re)build
+the bootloader via the equivalent of running the ``python ./waf configure all``
+command. You can pass additional arguments to the build process by setting
+the ``PYINSTALLER_BOOTLOADER_WAF_ARGS`` environment variable.
 
-* AIX (using gcc or xlc)
-* HP-UX  (using gcc or xlc)
-* Solaris
+For the above to work, you also need to ensure that:
 
-For more information about cross-building please read on
-and mind the section about the virtual machines
-provided in the Vagrantfile.
+* prior installation of PyInstaller (if present) is removed: ``pip uninstall PyInstaller``
+* any cached wheels from previous PyInstaller installation attempts are
+  removed, to prevent ``pip`` from re-using them: ``pip cache remove PyInstaller``
+* when running the ``pip install`` command, ``--no-binary=pyinstaller`` is
+  added, to ensure PyInstaller is installed from source distribution
+  (sdist), rather from a binary wheel
+
+It is also recommended to use ``--verbose`` option with ``pip install``
+command, so you can observe the bootloader's build log and verify that
+it was, in fact, rebuild (as opposed, for example, to ``pip`` simply
+re-using and installing a pre-built wheel).
+
+Therefore, the complete list of steps is as follows:
+
+.. tab:: Windows (command prompt)
+
+   .. code-block:: batch
+
+      set PYINSTALLER_COMPILE_BOOTLOADER=1
+      set "PYINSTALLER_BOOTLOADER_WAF_ARGS=--example-option=example-value --example-flag"
+      python -m pip uninstall PyInstaller
+      python -m pip cache remove PyInstaller
+      python -m pip install --verbose --no-binary=PyInstaller PyInstaller
+
+
+.. tab:: Windows (PowerShell)
+
+   .. code-block:: powershell
+
+      $env:PYINSTALLER_COMPILE_BOOTLOADER=1
+      $env:PYINSTALLER_BOOTLOADER_WAF_ARGS="--example-option=example-value --example-flag"
+      python -m pip uninstall PyInstaller
+      python -m pip cache remove PyInstaller
+      python -m pip install --verbose --no-binary=PyInstaller PyInstaller
+
+
+.. tab:: Other
+
+   .. code-block:: shell
+
+      export PYINSTALLER_COMPILE_BOOTLOADER=1
+      export PYINSTALLER_BOOTLOADER_WAF_ARGS="--example-option=example-value --example-flag"
+      python -m pip uninstall PyInstaller
+      python -m pip cache remove PyInstaller
+      python -m pip install --verbose --no-binary=PyInstaller PyInstaller
 
 
 Building for GNU/Linux
@@ -87,39 +176,6 @@ Now you can build the bootloader as shown above.
 
 Alternatively you may want to use the `linux64` build-guest
 provided by the Vagrantfile (see below).
-
-
-Building Linux Standard Base (LSB) compliant binaries (optional)
------------------------------------------------------------------
-
-By default, the bootloaders on GNU/Linux are ”normal“, non-LSB binaries, which
-should be fine for all GNU/Linux distributions.
-
-If for some reason you want to build Linux Standard Base (LSB) compliant
-binaries [#]_, you can do so by specifying ``--lsb`` on the waf command line,
-as follows::
-
-       python ./waf distclean all --lsb
-
-LSB version 4.0 is required for successfully building of bootloader. Please
-refer to ``python ./waf --help`` for further options related to LSB building.
-
-.. [#] Linux Standard Base (LSB) is a set of open standards that should
-       increase compatibility among GNU/Linux distributions. Unfortunately it is
-       not widely adopted and both Debian and Ubuntu dropped support for LSB
-       in autumn 2015. Thus PyInstaller bootloaders are no longer provided
-       as LSB binary.
-
-
-Cross Building for Different Architectures
-------------------------------------------
-
-Bootloaders can be built for other architectures such as ARM or MIPS using
-Docker_.
-The `Dockerfile <https://github.com/pyinstaller/pyinstaller/tree/develop/bootloader/Dockerfile>`_ contains the instructions on how to do this.
-Open it in some flavour of text previewer to see them::
-
-    less bootloader/Dockerfile
 
 
 Building for macOS
@@ -155,12 +211,12 @@ Build a thin, native executable::
 Build a thin, ``x86_64`` executable (regardless of the build machine's
 architecture)::
 
-    CC='clang -arch=x86_64' python waf --no-universal2  all
+    CC='clang -arch x86_64' python waf --no-universal2  all
 
 Build a thin, ``arm64`` executable (regardless of the build machine's
 architecture)::
 
-    CC='clang -arch=arm64' python waf --no-universal2 all
+    CC='clang -arch arm64' python waf --no-universal2 all
 
 By default, the build script targets macOS 10.13, which can be overridden by
 exporting the MACOSX_DEPLOYMENT_TARGET environment variable.
@@ -171,7 +227,7 @@ Cross-Building for macOS
 -----------------------------------
 
 For cross-compiling for macOS you need the Clang/LLVM compiler, the
-`cctools` (ld, lipo, …), and the OSX SDK. Clang/LLVM is a cross compiler by
+`cctools` (ld, lipo, …), and the macOS SDK. Clang/LLVM is a cross compiler by
 default and is available on nearly every GNU/Linux distribution, so you just
 need a proper port of the cctools and the macOS SDK.
 
@@ -229,7 +285,7 @@ Building the Bootloader
 Again, simply use the Vagrantfile to automatically build the macOS bootloaders::
 
      export TARGET=OSX  # make the Vagrantfile build for macOS
-     vagrant up linux64 && vagrant halt linux
+     vagrant up linux64 && vagrant halt linux64
 
 This should create the bootloaders in
 * :file:`../PyInstaller/bootloader/Darwin-{*}/`.
@@ -276,7 +332,7 @@ between three options:
    This is why the bootloaders delivered with PyInstaller are build using
    Visual Studio C++ compiler.
 
-   Visual Studio 2015 or later is required.
+   Visual Studio 2017 or later is required.
 
 
 2. Using the `MinGW-w64`_ suite.
@@ -313,8 +369,8 @@ In all cases you may want
 You can also build the bootloaders for cygwin.
 
 
-Build using Visual Studio C++
----------------------------------
+Build using Microsoft Visual C/C++ toolchain
+--------------------------------------------
 
 * With our `wscript` file, you don't need to run ``vcvarsall.bat`` to ’switch’
   the environment between VC++ installations and target architecture. The
@@ -331,18 +387,27 @@ Build using Visual Studio C++
      `chocolatey <https://chocolatey.org/>`_ package manager.
      While at a first glance it looks like overdose, this is the easiest
      way to install the C++ build-tools. It comes down to two lines in an
-     administrative powershell::
+     administrative powershell; the `one-line-install as written on the chocolatey
+     homepage <https://chocolatey.org/install>`_ to install `chocolatey`
+     itself, followed by::
 
-       … one-line-install as written on the chocolatey homepage
        choco install -y python3 visualstudio2019-workload-vctools
+
+  .. note::
+     When building bootloader with MSVC toolchain, the Control Flow Guard
+     (CFG) feature is enabled by default. This might cause crashes in
+     libraries that need to manipulate control flow (see :ref:`here
+     <control flow guard>`). In order to build application that uses such
+     library, bootloader needs to be (re)built with CFG disabled, using
+     the ``--no-cfg`` option.
 
 * Useful Links:
 
-  * `Microsoft Visual C++ Build-Tools 2015
-    <http://landinghub.visualstudio.com/visual-cpp-build-tools>`_
-  * `Microsoft Build-Tools for Visual Studio 2017.
-    <https://www.visualstudio.com/downloads/#build-tools-for-visual-studio-2017>`_
-
+  * `Microsoft Build-Tools for Visual Studio 2017 (direct download) <https://aka.ms/vs/15/release/vs_buildtools.exe>`_
+  * `Microsoft Build-Tools for Visual Studio 2019 (direct download) <https://aka.ms/vs/16/release/vs_buildtools.exe>`_
+  * `Microsoft Build-Tools for Visual Studio 2022 (direct download) <https://aka.ms/vs/17/release/vs_buildtools.exe>`_
+  * `Microsoft Build-Tools for Visual Studio 2026 (direct download) <https://aka.ms/vs/stable/vs_BuildTools.exe>`_
+  * `Microsoft Build-Tools for Visual Studio 2026 (main download page) <https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2026>`_
 
 After installing the C++ build-tool
 you can build the bootloader as shown above.
@@ -394,56 +459,60 @@ Building for AIX
 * By default AIX builds 32-bit executables.
 * For 64-bit executables set the environment variable :envvar:`OBJECT_MODE`.
 
-If Python was built as a 64-bit executable
-then the AIX utilities that work with binary files
-(e.g., .o, and .a) may need the flag ``-X64``.
-Rather than provide this flag with every command,
-the preferred way to provide this setting
-is to use the environment variable :envvar:`OBJECT_MODE`.
-Depending on whether Python was build as a 32-bit or a 64-bit executable
-you may need to set or unset
-the environment variable :envvar:`OBJECT_MODE`.
+When creating a 64-bit build, the compiler and other AIX utilities that
+work with binary files (for example, the :command:`strip` utility) may
+need to be passed the ``-X64`` flag to force 64-bit mode. Rather than
+passing this flag to every command, the preferred way to provide this
+setting is to use the :envvar:`OBJECT_MODE` environment variable.
 
-To determine the size the following command can be used::
+Depending on whether you are using 32-bit or 64-bit Python build,
+you may therefore need to set or unset the :envvar:`OBJECT_MODE` environment
+variable prior to running  ``waf`` in order to build a matching type of the
+bootloader executable.
 
-    $ python -c "import sys; print(sys.maxsize <= 2**32)"
-    True
+To determine whether you are using 32-bit or 64-bit Python, use the following
+command::
 
-When the answer is ``True`` (as above) Python was build as a 32-bit
-executable.
+    python -c "import sys; print(sys.maxsize <= 2**32)"
 
-When working with a 32-bit Python executable proceed as follows::
+If the output of above command is ``True``, your Python is 32-bit, and
+you should build bootloader using the following commands::
 
     unset OBJECT_MODE
-    ./waf configure all
+    python ./waf all
 
-When working with a 64-bit Python executable proceed as follows::
+Otherwise (64-bit Python), you should use the following commands::
 
     export OBJECT_MODE=64
-    ./waf configure all
+    python ./waf all
 
-.. note:: The correct setting of :envvar:`OBJECT_MODE` is also needed when you
-   use PyInstaller to package your application.
+.. note:: While :envvar:`OBJECT_MODE` environment variable is honored by
+   IBM's :command:`xlc_r` compiler, the :command:`gcc` compiler from *AIX
+   Toolbox for Open Source Software* (found in :command:`/opt/freeware/bin/gcc`)
+   does not seem to honor it. When using this compiler, you need to set
+   the target architecture by passing ``--target-arch`` option to ``waf``,
+   for example::
 
-To build the bootloader you will need a compiler compatible (identical)
-with the one used to build python.
+     python ./waf all --target-arch=64bit
+
+To build the bootloader, you will need a compiler compatible (identical)
+with the one that was used to build Python itself.
 
 .. note:: Python compiled with a different version of gcc that you are using
    might not be compatible enough.
    GNU tools are not always binary compatible.
 
-If you do not know which compiler that was,
-this command can help you determine
-if the compiler was gcc or an IBM compiler::
+To identify the compiler that was used to build Python, you can use the
+following command::
 
     python -c "import sysconfig; print(sysconfig.get_config_var('CC'))"
 
-If the compiler is gcc you may need additional RPMs installed
+If the compiler is :command:`gcc` you may need additional RPMs installed
 to support the GNU run-time dependencies.
 
-When the IBM compiler is used no additional prerequisites are expected.
-The recommended value for :envvar:`CC` with the IBM compilers is
-`:command:xlc_r`.
+When the IBM compiler is used, no additional prerequisites are expected.
+The recommended value for :envvar:`CC` environment variable with the
+IBM compiler is :command:`xlc_r`.
 
 
 Building for FreeBSD
@@ -493,7 +562,7 @@ All guests [#]_ will automatically build the bootloader when running
 `vagrant up GUEST` or
 `vagrant provision GUEST`. They will build both 32- and 64-bit bootloaders.
 
-.. [#] Except of guest `osxcross`, which will build the OS X SDK and cctools
+.. [#] Except of guest `osxcross`, which will build the macOS SDK and cctools
        as described in section :ref:`cross-building for macos`.
 
 When building the bootloaders, the guests are sharing
@@ -550,7 +619,7 @@ We currently provide this guests:
                       some cases you need to enter the password (which is
                       `Passw0rd!`).
 
-:build-osxcross: GNU/Linux guest used to build the OS X SDK and `cctools` as
+:build-osxcross: GNU/Linux guest used to build the macOS SDK and `cctools` as
                  described in section :ref:`cross-building for macos`.
 
 

@@ -9,31 +9,59 @@
 # SPDX-License-Identifier: (GPL-2.0-or-later WITH Bootloader-exception)
 #-----------------------------------------------------------------------------
 
+import pytest
+
 from PyInstaller.utils.cliutils import makespec
 
 
-def test_maskespec_basic(tmpdir, monkeypatch):
-    py = tmpdir.join('abcd.py').ensure()
-    print()
-    print(py)
-    spec = tmpdir.join('abcd.spec')
-    monkeypatch.setattr('sys.argv', ['foobar', str(py)])
+def test_maskespec_basic(tmp_path, monkeypatch):
+    py_file = tmp_path / 'abcd.py'
+    py_file.touch()
+
+    monkeypatch.setattr('sys.argv', ['foobar', str(py_file)])
     # changing cwd does not work, since DEFAULT_SPECPATH is set *very* early
-    monkeypatch.setattr('PyInstaller.building.makespec.DEFAULT_SPECPATH', str(tmpdir))
+    monkeypatch.setattr('PyInstaller.building.makespec.DEFAULT_SPECPATH', str(tmp_path))
     makespec.run()
-    assert spec.exists()
-    text = spec.read_text('utf-8')
-    assert 'Analysis' in text
+
+    spec_file = tmp_path / 'abcd.spec'
+    assert spec_file.exists()
+    spec_text = spec_file.read_text(encoding='utf-8')
+    assert 'Analysis' in spec_text
 
 
-def test_makespec_splash(tmpdir, monkeypatch):
-    py = tmpdir.join('with_splash.py').ensure()
-    print()
-    print(py)
-    spec = tmpdir.join('with_splash.spec')
-    monkeypatch.setattr('sys.argv', ['foobar', '--splash', 'image.png', str(py)])
-    monkeypatch.setattr('PyInstaller.building.makespec.DEFAULT_SPECPATH', str(tmpdir))
+def test_makespec_splash(tmp_path, monkeypatch):
+    py_file = tmp_path / 'with_splash.py'
+    py_file.touch()
+
+    monkeypatch.setattr('sys.argv', ['foobar', '--splash', 'image.png', str(py_file)])
+    monkeypatch.setattr('PyInstaller.building.makespec.DEFAULT_SPECPATH', str(tmp_path))
     makespec.run()
+
+    spec = tmp_path / 'with_splash.spec'
     assert spec.exists()
     text = spec.read_text('utf-8')
     assert 'Splash' in text
+
+
+@pytest.mark.win32
+def test_makespec_path_sep_normalisation(tmp_path, monkeypatch):
+    args = [
+        "",
+        r"foo'\bar.py",
+        r"--splash=foo'\bar.png",
+        r"--add-data=foo'\bar:a\b",
+        r"--path=foo'\bar",
+        r"--icon=foo'\bar.png",
+        r"--additional-hooks-dir=foo'\bar",
+        r"--runtime-hook=foo'\bar",
+        r"--upx-exclude=foo'\bar",
+        "--hide-console=hide-late",
+    ]
+    monkeypatch.setattr('sys.argv', args)
+    monkeypatch.setattr('PyInstaller.building.makespec.DEFAULT_SPECPATH', str(tmp_path))
+    makespec.run()
+    spec_contents = (tmp_path / "bar.spec").read_text("utf-8")
+    # All backslashes should have been converted to forward slashes
+    assert "\\" not in spec_contents
+    # Check for syntax errors (most likely from bogus quotes)
+    compile(spec_contents, "", "exec")

@@ -9,29 +9,28 @@
 # SPDX-License-Identifier: (GPL-2.0-or-later WITH Bootloader-exception)
 #-----------------------------------------------------------------------------
 
-from pathlib import Path
-from importlib.machinery import EXTENSION_SUFFIXES
+import pathlib
+import importlib.machinery
 
+from PyInstaller import compat
 from PyInstaller.depend import analysis, bindepend
-from PyInstaller.building import build_main
 from PyInstaller.building.build_main import Analysis
 from PyInstaller.building.api import PYZ
 
-# :todo: find a way to get this from `conftest` or such directory with testing modules used in some tests.
-_MODULES_DIR = Path(__file__).absolute().parent / "modules"
+_MODULES_DIR = pathlib.Path(__file__).parent / "modules"
 
 
-def test_issue_2492(monkeypatch, tmpdir):
+def test_issue_2492(monkeypatch, tmp_path):
     # Crash if an extension module has an hidden import to ctypes (e.g. added by the hook).
 
     # Need to set up some values
     monkeypatch.setattr(
         'PyInstaller.config.CONF', {
-            'workpath': str(tmpdir),
-            'spec': str(tmpdir),
-            'warnfile': str(tmpdir.join('warn.txt')),
-            'dot-file': str(tmpdir.join('imports.dot')),
-            'xref-file': str(tmpdir.join('imports.xref')),
+            'workpath': str(tmp_path),
+            'spec': str(tmp_path),
+            'warnfile': str(tmp_path / 'warn.txt'),
+            'dot-file': str(tmp_path / 'imports.dot'),
+            'xref-file': str(tmp_path / 'imports.xref'),
             'hiddenimports': [],
             'specnm': 'issue_2492_script',
             'code_cache': dict(),
@@ -40,72 +39,73 @@ def test_issue_2492(monkeypatch, tmpdir):
     # Speedup: avoid analyzing base_library.zip
     monkeypatch.setattr(analysis, 'PY3_BASE_MODULES', [])
 
-    script = tmpdir.join('script.py')
-    script.write('import _struct')
-    # create a hook
-    tmpdir.join('hook-_struct.py').write('hiddenimports = ["ctypes"]')
-    Analysis([str(script)], hookspath=[str(tmpdir)], excludes=['encodings', 'pydoc', 'xml', 'distutils'])
+    script = tmp_path / 'script.py'
+    script.write_text("import _struct", encoding='utf-8')
+
+    # Create a hook
+    (tmp_path / 'hook-_struct.py').write_text("hiddenimports = ['ctypes']", encoding='utf-8')
+    Analysis([str(script)], hookspath=[str(tmp_path)], excludes=['encodings', 'pydoc', 'xml', 'distutils'])
 
 
-def test_issue_5131(monkeypatch, tmpdir):
+def test_issue_5131(monkeypatch, tmp_path):
     """
     While fixing the endless recursion when the package's __init__ module is an extension (see
     tests/unit/test_modulegraph_more.py::package_init_is_extension_*), another error occurred:
     PyInstaller.building._utils._load_code() tried to complete the source code for extension module - triggered by
     PYZ.assemble(), which is collecting all source files - caused by this being marked as "PYMODULE" in the TOC.
     """
-    def getImports(*args, **kwargs):
+    def get_imports(*args, **kwargs):
         # Our faked binary does not match the expected file-format for all platforms, thus the resp. code might crash.
         # Simply ignore this.
         try:
-            return orig_getImports(*args, **kwargs)
+            return orig_get_imports(*args, **kwargs)
         except Exception:
             return []
 
-    def find_binary_dependencies(*args, **kwargs):
-        # This function from build_main is executed in an isolated sub-process, and also uses getImports(); due to
-        # isolation, we need to provide local override for getImports.
-        from PyInstaller.building.build_main import find_binary_dependencies as orig_find_binary_dependencies
-        from PyInstaller.depend import bindepend
+    orig_get_imports = bindepend.get_imports
+    monkeypatch.setattr(bindepend, "get_imports", get_imports)
 
-        orig_getImports = bindepend.getImports
+    # On macOS, we need to similarly override `osxutils.get_macos_sdk_version`.
+    if compat.is_darwin:
+        from PyInstaller.utils import osx as osxutils
 
-        def getImports(*args, **kwargs):
+        def get_macos_sdk_version(*args, **kwargs):
             try:
-                return orig_getImports(*args, **kwargs)
+                return orig_get_macos_sdk_version(*args, **kwargs)
             except Exception:
-                return []
+                return (10, 9, 0)  # Minimum version expected by check in Analysis.
 
-        bindepend.getImports = getImports
+        orig_get_macos_sdk_version = osxutils.get_macos_sdk_version
+        monkeypatch.setattr(osxutils, "get_macos_sdk_version", get_macos_sdk_version)
 
-        return orig_find_binary_dependencies(*args, **kwargs)
-
+    # Set up fake CONF for Analysis
     monkeypatch.setattr(
         'PyInstaller.config.CONF', {
-            'workpath': str(tmpdir),
-            'spec': str(tmpdir),
-            'warnfile': str(tmpdir.join('warn.txt')),
-            'dot-file': str(tmpdir.join('imports.dot')),
-            'xref-file': str(tmpdir.join('imports.xref')),
+            'workpath': str(tmp_path),
+            'spec': str(tmp_path),
+            'warnfile': str(tmp_path / 'warn.txt'),
+            'dot-file': str(tmp_path / 'imports.dot'),
+            'xref-file': str(tmp_path / 'imports.xref'),
             'hiddenimports': [],
             'specnm': 'issue_5131_script',
             'code_cache': dict(),
         }
     )
+
     # Speedup: avoid analyzing base_library.zip
     monkeypatch.setattr(analysis, 'PY3_BASE_MODULES', [])
 
-    orig_getImports = bindepend.getImports
-    monkeypatch.setattr(bindepend, "getImports", getImports)
-    monkeypatch.setattr(build_main, "find_binary_dependencies", find_binary_dependencies)
+    pkg = tmp_path / 'mypkg'
+    pkg.mkdir()
 
-    pkg = (tmpdir / 'mypkg').mkdir()
-    init = pkg / ('__init__' + EXTENSION_SUFFIXES[0])
-    init.write_binary(b'\0\0\0\0\0\0\0\0\0\0\0\0' * 20)
-    script = tmpdir.join('script.py')
-    script.write('import mypkg')
+    init = pkg / f"__init__{importlib.machinery.EXTENSION_SUFFIXES[0]}"
+    init.write_bytes(b'\0\0\0\0\0\0\0\0\0\0\0\0' * 20)
+
+    script = tmp_path / 'script.py'
+    script.write_text("import mypkg", encoding='utf-8')
+
     a = Analysis([str(script)], excludes=['encodings', 'pydoc', 'xml', 'distutils'])
-    PYZ(a.pure, a.zipped_data)
+    PYZ(a.pure)
 
 
 def test_issue_4141(pyi_builder):

@@ -130,6 +130,126 @@ So if you are using a Cython C object module, which imports Python modules,
 you will have to list these as :option:`--hidden-import`.
 
 
+.. _bytecode optimization level:
+
+Bytecode Optimization Level
+===========================
+
+In unfrozen Python, the :envvar:`PYTHONOPTIMIZE` environment variable
+and the ``-O`` `command-line option
+<https://docs.python.org/3/using/cmdline.html#miscellaneous-options>`_
+control the optimization level, which is reflected in the value of the
+``optimize`` flag in :data:`sys.flags`. The optimization level determines
+how python byte-compiles pure-python modules when it loads the for the
+first time (or which version of byte-compiled modules is loaded from
+``__pycache__``, if available). For example, at the first optimization level,
+the ``__debug__`` constant becomes ``False`` and ``assert`` statements
+are optimized away, while at the second level, documentation strings are
+removed from the modules' bytecode.
+
+In a PyInstaller-frozen applications, the optimization level of the embedded
+python interpreter is controlled by setting :ref:`python interpreter options
+<specifying python interpreter options>` that are set at the build time.
+This affects the value of ``optimize`` flag in :data:`sys.flags`. However,
+as PyInstaller by default collects pure-python modules in byte-compiled
+form, the value of the ``optimize`` flag at run time has no effect on the
+bytecode of such modules. I.e., even if optimization level of python
+interpreter in the frozen application is set to the second level via
+:ref:`python interpreter options <specifying python interpreter options>`,
+``assert`` statements will continue to work, and functions will retain their
+documentation strings. In order to affect the bytecode, the optimization
+level needs to be enforced during the build, specifically when PyInstaller
+compiles bytecode of modules that are to be collected.
+
+In PyInstaller <= 6.5, the only way to affect optimization level of
+the collected python code was to set the optimization level of the python
+process in which PyInstaller was running; either by setting the
+:envvar:`PYTHONOPTIMIZE` environment variable prior to running the
+PyInstaller command, or by invoking PyInstaller as a module and setting
+the python's ``-O`` flag, for example ``python -OO -m PyInstaller <...>``.
+
+In PyInstaller 6.6, an explicit bytecode optimization setting has been
+added both to the ``Analysis`` object in the :ref:`spec file <using spec files>`
+and to the command-line interface, in the form of the :option:`--optimize`
+command-line option.
+
+
+Optimization setting in the spec file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Starting with PyInstaller 6.6, the constructor of the ``Analysis`` object
+in the :ref:`spec file <using spec files>` accepts an integer parameter
+called ``optimize``. This parameter directly controls the optimization
+level of bytecode for collected python modules and the program's entry-point
+script.
+
+Setting the optimization level to a fixed value (0, 1, or 2) helps
+ensuring that the collected bytecode is always compiled with the specified
+optimization level, regardless of the optimization level under which
+the build process is running. On the other hand, setting the value to -1
+will cause the bytecode optimization level to be inherited from the
+build process (the behavior of older PyInstaller versions).
+
+Note that the ``optimize`` parameter passed to ``Analysis`` affects only
+the bytecode of collected modules. The run-time optimization level of the
+embedded interpreter (reflected in the value of ``optimize`` flag in
+:data:`sys.flags` as shown at run-time) is still controlled by
+:ref:`python interpreter options <specifying python interpreter options>`
+passed to the ``EXE`` constructor, and at the spec file level, the two
+settings are *not* coupled in any way.
+
+Therefore, if you want to disable ``assert`` statements in the
+collected modules as well as ensure that ``sys.flags.optimize`` displays
+1 at run time, you need to pass ``optimize=1`` parameter to ``Analysis``
+and pass a ``[('O', None, 'OPTION')]`` to ``EXE`` (as per
+:ref:`specifying python interpreter options`).
+
+
+Using the :option:`--optimize` command-line option
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PyInstaller 6.6 introduced a new command-line option, called :option:`--optimize`.
+This option can be used with ``pyi-makespec`` when generating a
+:ref:`spec file <using spec files>` for later use, or with ``pyinstaller``
+when building directly from a .py file (i.e., with spec file generated
+on-the-fly during the build).
+
+In the generated :ref:`spec file <using spec files>`, the value passed
+via :option:`--optimize` option is passed to ``Analysis`` via the
+``optimize`` argument, and in addition, the corresponding
+:ref:`python interpreter options <specifying python interpreter options>`
+are also generated for the ``EXE``. Therefore, this is the preferred
+approach to specifying the target bytecode optimization level for the
+frozen application.
+
+If :option:`--optimize` is not used on the command-line, but
+:option:`--python-option` is used to pass the ``O``
+:ref:`python interpreter options <specifying python interpreter options>`,
+the optimization level is inferred from number of such options, and passed
+to ``Analysis`` in the generated spec file.
+
+If neither :option:`--optimize` nor :option:`--python-option` are used,
+the optimization level for the generated spec file is determined from
+the optimization level of python interpreter under which PyInstaller
+is running. In the generated spec file, the inherited optimization level
+is passed to ``Analysis`` (thus fixing the optimization level for
+subsequent builds) and corresponding ``OPTION`` entries are generated
+for ``EXE`` as necessary.
+
+
+Optimization level and the modulegraph's code-cache
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+During the import analysis process, PyInstaller's modulegraph ends up
+retrieving the code objects (bytecode) for all python modules that pass
+through analysis.
+
+If the optimization level of the PyInstaller's build process matches the
+target optimization level for collected modules, the modulegraph's
+code-object cache can be reused, which helps to speed up the build
+process.
+
+
 .. _macos multi-arch support:
 
 macOS multi-arch support
@@ -161,7 +281,9 @@ and produces a single-arch binary** (``x86_64`` when running on Intel Mac
 or under `rosetta2` on M1 Mac, or ``arm64`` when running on M1 Mac). The
 reason for that is that even with a ``universal2`` python environment,
 some packages may end up providing only single-arch binaries, making it
-impossible to create a functional ``universal2`` frozen application.
+impossible to create a functional ``universal2`` frozen application. See
+the following sub-section for details on architecture validation and
+possible work-arounds for dealing with single-arch packages.
 
 The alternative options, such as creating a ``universal2`` version
 of frozen application, or creating a non-native single-arch version using
@@ -171,21 +293,68 @@ file via the ``target_arch=`` argument to ``EXE()``, or on command-line
 via the :option:`--target-arch` switch. Valid values are ``x86_64``, ``arm64``,
 and ``universal2``.
 
+.. note::
+   Creation of ``universal2`` frozen applications is supported only with
+   the PyInstaller's build mechanism described in this section.
+
+   While tools like ``lipo`` allow you to combine two single-arch
+   executables (i.e., an ``x86_64`` one and an ``arm64`` one) into a
+   ``universal2`` executable, this does not work with PyInstaller-built
+   executables. For example, building two single-arch PyInstaller
+   ``onefile`` executables and merging them with ``lipo`` will result
+   in an executable that will still run on only one platform; specifically,
+   the one whose executable slice happens to be last in the fat executable
+   (in a ``universal2`` executable, this is usually the ``arm64`` slice).
+
+   This is because each PyInstaller-built single-arch executable contains
+   its own embedded PKG archive, and in a ``onefile`` build, each of those
+   contains its own set of single-arch binaries (python extensions and
+   shared libraries). Once merged into fat executable, each architecture
+   slice retains its PKG archive, but the PyInstaller's bootloader code
+   in either architecture slice is able to discover and use only one PKG
+   archive, the one that occurs last (because the executable is scanned
+   back-to-front).
+
+.. note::
+   Somewhat related to the previous note, building a ``universal2``
+   application using PyInstaller's build mechanism and then using ``lipo``
+   to convert the fat executable into two single-arch thin executables
+   will also fail to produce working executables.
+
+   The reason is that in a ``universal2`` build, a single PKG archive is
+   created and embedded into the last architecture slice of the
+   ``universal2`` executable (which is usually the ``arm64`` slice).
+   Therefore, when extracting architecture slices using ``lipo``, the
+   last slice will have the PKG archive and will run correctly, while
+   the first slice will raise an error due to lack of the PKG archive.
+
 
 Architecture validation during binary collection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To prevent run-time issues caused by missing or mismatched architecture slices
 in binaries, the binary collection process performs strict architecture validation.
-It checks whether collected binary files contain required arch slice(s), and if
-not, the build process is aborted with an error message about the problematic
-binary.
+It checks whether collected binary files contain required arch slice(s) -- if
+not, the build process is aborted with exception of type
+``PyInstaller.utils.osx.IncompatibleBinaryArchError`` that contains a
+detailed error message about the problematic binary.
+
+The error message will typically be either ``"{name} does not contain
+slice for {target_arch}!"`` (when trying to build a ``universal2`` program
+and the collected binary is a thin single-arch file) or ``"{name} is
+incompatible with target arch {target_arch} (has arch: ...)!"`` (when
+trying to build program for foreign architecture in a partial ``universal2``
+environment and the collected binary is a thin single-arch file for the
+non-target architecture).
 
 In such cases, creating frozen application for the selected target
 architecture will not be possible unless the problem of missing arch slices
-is manually addressed (for example, by downloading the wheel corresponding to
+is manually addressed; for example, by downloading the wheel corresponding to
 the missing architecture, and stiching the offending binary files together
-using the ``lipo`` utility).
+using the ``lipo`` utility. You can also use 3rd party utilities, such as
+``delocate-merge`` from the `delocate <https://pypi.org/project/delocate>`_
+project, to merge two single-arch wheels for a package into a ``universal2``
+wheel, and then install the merged wheel into your build environment.
 
 .. versionchanged:: 4.10
    In earlier PyInstaller versions, the architecture validation was performed
@@ -499,7 +668,7 @@ conversion of ``.png`` and ``.jpg`` images:
    # img2gray.spec
    a = Analysis(['img2gray.py'], )
 
-   pyz = PYZ(a.pure, a.zipped_data)
+   pyz = PYZ(a.pure)
 
    exe = EXE(
         pyz,
@@ -517,7 +686,6 @@ conversion of ``.png`` and ``.jpg`` images:
    coll = COLLECT(
         exe,
         a.binaries,
-        a.zipfiles,
         a.datas,
         strip=False,
         upx=False,
@@ -634,7 +802,7 @@ a ``onedir`` application bundle with a custom file association
 
    a = Analysis(['eventlogger_tk.py'])
 
-   pyz = PYZ(a.pure, a.zipped_data)
+   pyz = PYZ(a.pure)
 
    exe = EXE(
        pyz,
@@ -652,7 +820,6 @@ a ``onedir`` application bundle with a custom file association
    coll = COLLECT(
        exe,
        a.binaries,
-       a.zipfiles,
        a.datas,
        strip=False,
        upx=False,
@@ -788,7 +955,7 @@ Below is an example application and its corresponding :ref:`.spec file <using sp
    # eventlogger_qt.spec
    a = Analysis(['eventlogger_qt.py'])
 
-   pyz = PYZ(a.pure, a.zipped_data)
+   pyz = PYZ(a.pure)
 
    exe = EXE(
        pyz,
@@ -806,7 +973,6 @@ Below is an example application and its corresponding :ref:`.spec file <using sp
    coll = COLLECT(
        exe,
        a.binaries,
-       a.zipfiles,
        a.datas,
        strip=False,
        upx=False,
@@ -916,6 +1082,15 @@ console control signals <https://docs.microsoft.com/en-us/windows/console/handle
 * ``CTRL_LOGOFF_EVENT``: a user logging off
 
 * ``CTRL_SHUTDOWN_EVENT``: system shutting down
+
+.. note::
+   As documented in SetConsoleCtrlHandler_ notes, if the process ends
+   up loading ``gdi32.dll`` or ``user32.dll`` shared library (either
+   directly or indirectly), the installed console handler will not receive
+   ``CTRL_LOGOFF_EVENT`` and ``CTRL_SHUTDOWN_EVENT`` events. The session
+   shutdown can be detected and handled only by means of setting up a
+   hidden window and processing ``WM_QUERYENDSESSION`` and ``WM_ENDSESSION``
+   window messages.
 
 When a console control signal is generated, the handler installed via
 SetConsoleCtrlHandler_ (if any) is executed *in a separate thread*,
@@ -1060,6 +1235,34 @@ behind the unpacked temporary directory.
    until after the child process is terminated, and clean up the unpacked
    temporary directory. However, various caveats still apply, as
    discussed in the following sub-sections.
+
+.. versionchanged:: 6.0
+   due to bootloader being linked against ``user32.dll``, the installed
+   console handler cannot receive ``CTRL_LOGOFF_EVENT`` and
+   ``CTRL_SHUTDOWN_EVENT`` events anymore. This applies to the
+   bootloader-installed handler in the parent process of a onefile
+   application, as well as user-installed handler in the main application
+   process in either onefile or onedir application.
+
+.. versionchanged:: 6.10
+   the bootloader's ``CTRL_CLOSE_EVENT`` handler in onefile parent
+   process now explicitly terminates the child process after giving it
+   500 milliseconds grace period. This is necessary for proper clean up
+   of temporary files when application runs under Windows Terminal
+   (instead of ``conhost.exe``), and user closes the terminal window
+   (or tab).
+
+.. versionchanged:: 6.10
+   the bootloader in onefile parent process now sets up a hidden window
+   to receive and process ``WM_QUERYENDSESSION`` and ``WM_ENDSESSION``
+   window messages. Upon receiving the confirmed ``WM_ENDSESSION``
+   message, the parent process terminates the child process after
+   giving it 1-second grace period, before it proceeds with the
+   cleanup. This ensures that temporary files of a background-running
+   onefile application are cleaned up when user logs off or initiates
+   system shutdown or restart. The cleanup should now work regardless
+   of whether application is built in console or noconsole/windowed
+   mode, and regardless of whether splash screen is used or not.
 
 .. [#keyboard_interrupt] The ``KeyboardInterrupt`` exception could have
    been used to terminate the loop as well. However, that would not handle
@@ -1585,6 +1788,100 @@ closed and the parent process being immediately and unconditionally
 terminated. The child process keeps running. Since the parent process
 was terminated before it could perform clean-up, the temporary directory
 is left behind.
+
+
+Automatic hiding and minimization of console window under Windows
+=================================================================
+
+For console-enabled Windows applications, PyInstaller offers an option
+to automatically hide or minimize the console window *when the console
+window is owned by the program's process* (i.e., the program was not
+launched from an existing console window).
+
+Automatic minimization of console window allows a GUI application to
+put the console out of the user's way, while allowing it to be brought
+back if required. Automatic hiding of console window might be used to
+create an illusion of a hybrid application that has no console when
+launched by double-clicking on the executable, but shows console
+output when launched from existing console window.
+
+Note that the programmatic hiding/minimization of console can be easily
+implemented by application itself using win32 API via ``ctypes``.
+The advantage of having it in PyInstaller's bootloader is that:
+
+* it can be performed very early in the program's life cycle (especially
+  in case of ``onefile`` builds).
+
+* in ``onefile`` builds, the bootloader can easily determine the
+  ownership of console, regardless of parent and child process being
+  used (as the check is executed in the parent process).
+
+Also note that console hiding is different from ``windowed``/``noconsole``
+builds, which have no console at all. This option works only with
+console-enabled builds, and involves PyInstaller's bootloader
+programmatically hiding or minimizing the console.
+
+To enable this functionality, use the :option:`--hide-console` command-line
+option, or corresponding ``hide_console`` argument to ``EXE`` in the .spec
+file. Currently, four modes are supported: ``hide-early``, ``minimize-early``,
+``hide-late``, and ``minimize-late``.
+
+Depending on the setting, the console is hidden/mininized either early
+in the bootloader execution or late in the bootloader execution. The
+early option takes place as soon as the PKG archive is found. In ``onefile``
+builds, the late option takes place after application has unpacked itself
+and before it launches the child process. In ``onedir`` builds, the late
+option takes place before starting the embedded python interpreter.
+
+.. note::
+
+   Even with hiding/minimizing console early in the bootloader's execution,
+   the user might see console being opened for an instant before it is
+   hidden or minimized.
+
+   In fact, hiding console before the application's UI is brought up
+   might give the user an impression that the application has crashed.
+   Therefore, it might be preferable to have the application code to
+   implement its own programmatic hiding/minimization of the console
+   window, and have it performed only after the UI becomes visible.
+
+.. note::
+   This feature has several known caveats when ``Windows Terminal`` is
+   used as the default terminal app to host command-line applications, as
+   opposed to the old ``Windows Console Host`` (``conhost.exe``). This
+   is the default setting on contemporary Windows 11 systems [*]_.
+
+   The issues are as follows:
+
+   * terminal window can be only minimized; attempting to hide it will
+     result in minimization instead.
+
+   * if the user has configured Windows Terminal to open new tabs instead
+     of new windows, the application's console will end up attached as
+     new tab in existing window, if available. Therefore, if application
+     tries to hide/minimize its console, it will end up minimizing that
+     window (along with other tabs that it might contain).
+
+   * the Windows terminal window will likely be fully shown before it
+     ends up being minimized.
+
+   * due to timing issues, the Windows terminal might fail to be minimized
+     (although the bootloader is trying to mitigate this particular issue).
+
+   As an application developer, it is unlikely that you will have control
+   over users' default terminal app and its settings. Therefore, if you
+   are using this feature to create an illusion of a hybrid-console
+   application (that has no console when launched by double-clicking on
+   the executable, but shows console output when launched from existing
+   console window), the only reliable approach at the moment is to
+   explicitly force the application to be launched via ``conhost.exe``.
+
+   One way to achieve that (regardless of default terminal app setting)
+   is to have your application's installer (assuming you have one) create
+   a desktop (or Start Menu) shortcut that has the ``Target`` set to
+   ``conhost.exe c:\path\to\installed\application.exe``.
+
+.. [*] The setting can be found under ``System Settings → For Developers → Terminal``.
 
 .. include:: _common_definitions.txt
 

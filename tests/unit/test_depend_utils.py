@@ -14,7 +14,7 @@ import pytest
 import textwrap
 
 from PyInstaller.depend import utils
-from PyInstaller.compat import is_win, is_musl, is_macos_11_compat
+from PyInstaller import compat
 
 CTYPES_CLASSNAMES = (
     'CDLL', 'ctypes.CDLL',
@@ -32,8 +32,8 @@ def __scan_code_for_ctypes(code, monkeypatch, extended_args):
     if extended_args:
         # Chuck in a load of preceding rubbish to test if the bytecode scanner can correctly
         # handle the EXTENDED_ARGS opcode.
-        from test_bytecode import many_constants, many_globals
-        code = many_constants() + many_globals() + code
+        from test_bytecode import many_str_constants, many_globals
+        code = many_str_constants() + many_globals() + code
 
     co = compile(code, 'dummy', 'exec')
     #import pdb ; pdb.set_trace()
@@ -43,7 +43,7 @@ def __scan_code_for_ctypes(code, monkeypatch, extended_args):
 @pytest.mark.parametrize('classname', CTYPES_CLASSNAMES)
 @pytest.mark.parametrize('extended_args', [False, True])
 def test_ctypes_CDLL_call(monkeypatch, classname, extended_args):
-    code = "%s('somelib.xxx')" % classname
+    code = f"{classname}('somelib.xxx')"
     res = __scan_code_for_ctypes(code, monkeypatch, extended_args)
     assert res == set(['somelib.xxx'])
 
@@ -52,7 +52,7 @@ def test_ctypes_CDLL_call(monkeypatch, classname, extended_args):
 @pytest.mark.parametrize('extended_args', [False, True])
 def test_ctypes_LibraryLoader(monkeypatch, classname, extended_args):
     # This type of usage is only valid on Windows and the lib-name will always get `.dll` appended.
-    code = "%s.somelib" % classname.lower()
+    code = f"{classname.lower()}.somelib"
     res = __scan_code_for_ctypes(code, monkeypatch, extended_args)
     assert res == set(['somelib.dll'])
 
@@ -60,21 +60,24 @@ def test_ctypes_LibraryLoader(monkeypatch, classname, extended_args):
 @pytest.mark.parametrize('classname', CTYPES_CLASSNAMES)
 @pytest.mark.parametrize('extended_args', [False, True])
 def test_ctypes_LibraryLoader_LoadLibrary(monkeypatch, classname, extended_args):
-    code = "%s.LoadLibrary('somelib.xxx')" % classname.lower()
+    code = f"{classname.lower()}.LoadLibrary('somelib.xxx')"
     res = __scan_code_for_ctypes(code, monkeypatch, extended_args)
     assert res == set(['somelib.xxx'])
 
 
 @pytest.mark.parametrize('extended_args', [False, True])
-@pytest.mark.skipif(is_musl, reason="find_library() doesn't work on musl")
-@pytest.mark.skipif(is_macos_11_compat, reason="find_library() requires python built with Big Sur support.")
+@pytest.mark.skipif(compat.is_musl, reason="find_library() doesn't work on musl")
+@pytest.mark.skipif(
+    compat.is_macos_11 and not (compat.is_macos_11_native and compat.is_py39),
+    reason="find_library() requires python >= 3.9 built with Big Sur support.",
+)
 def test_ctypes_util_find_library(monkeypatch, extended_args):
     # for lind_library() we need a lib actually existing on the system
-    if is_win:
+    if compat.is_win:
         libname = "KERNEL32"
     else:
         libname = "c"
-    code = "ctypes.util.find_library('%s')" % libname
+    code = f"ctypes.util.find_library('{libname}')"
     res = __scan_code_for_ctypes(code, monkeypatch, extended_args)
     assert res
 
@@ -94,10 +97,11 @@ def test_ctypes_util_find_library_as_default_argument():
 
 
 @pytest.mark.linux
+@pytest.mark.skipif(compat.is_termux, reason="Termux does not have libc.so")
 def test_ldconfig_cache():
     utils.load_ldconfig_cache()
 
-    if is_musl:
+    if compat.is_musl:
         # load_ldconfig_cache() should be a no-op on musl because musl does not use ldconfig.
         assert not utils.LDCONFIG_CACHE
         return

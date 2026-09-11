@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #-----------------------------------------------------------------------------
 # Copyright (c) 2005-2023, PyInstaller Development Team.
 #
@@ -15,16 +14,17 @@ import os
 import pytest
 
 from PyInstaller import isolated
-from PyInstaller.compat import is_win, is_darwin
-from PyInstaller.utils.hooks import is_module_satisfies, can_import_module
+from PyInstaller.compat import is_win, is_darwin, is_linux
+from PyInstaller.utils.hooks import check_requirement, can_import_module
 from PyInstaller.utils.hooks.qt import get_qt_library_info
-from PyInstaller.utils.tests import importorskip, requires, skipif
+from PyInstaller.utils.tests import importorskip, requires, skipif, onedir_only
 
-PYQT5_NEED_OPENGL = pytest.mark.skipif(
-    is_module_satisfies('PyQt5 <= 5.10.1'),
-    reason='PyQt5 v5.10.1 and older does not package ``opengl32sw.dll``, '
-    'the OpenGL software renderer, which this test requires.'
-)
+# Several tests in this module have a @pytest.mark.flaky() with `condition` argument, which allows us to perform re-runs
+# only under special conditions (for example, specific version of Qt bindings, specific OS, etc.). However, having a
+# falsy `condition` argument precludes us from enabling re-runs globally by adding `--reruns=1` to `pytest` arguments;
+# at the time of writing (`pytest-rerunfailures` v16.4), this is true even if `--reruns-mode append` is used. Therefore,
+# we use a special environment variable that allows us to manually activate the reruns for marked tests.
+force_flaky_rerun = os.environ.get("PYINSTALLER_TEST_FORCE_FLAKY_RERUN", "0") == "1"
 
 
 def qt_param(qt_flavor, *args, **kwargs):
@@ -39,8 +39,8 @@ def qt_param(qt_flavor, *args, **kwargs):
 _QT_PY_PACKAGES = ['PyQt5', 'PyQt6', 'PySide2', 'PySide6']
 QtPyLibs = pytest.mark.parametrize('QtPyLib', [qt_param(i) for i in _QT_PY_PACKAGES])
 
-# OS X bundles, produced by the ``--windowed`` flag, invoke a unique code path that sometimes causes failures in Qt
-# applications.
+# macOS .app bundles, produced by the ``--windowed`` flag, invoke a unique code path that sometimes causes failures in
+# Qt applications. So build with ``--windowed`` option, which will build and run both POSIX build and .app bundle.
 USE_WINDOWED_KWARG = dict(pyi_args=['--windowed']) if is_darwin else {}
 
 
@@ -69,44 +69,70 @@ _ensure_qt_library_info_is_initialized()
 @QtPyLibs
 def test_Qt_QtWidgets(pyi_builder, QtPyLib):
     pyi_builder.test_source(
-        """
+        f"""
         import sys
 
-        from {0}.QtWidgets import QApplication, QWidget
-        from {0}.QtCore import QTimer
+        from {QtPyLib}.QtWidgets import QApplication, QWidget
+        from {QtPyLib}.QtCore import QTimer
 
-        is_qt6 = '{0}' in {{'PySide6', 'PyQt6'}}
+        is_qt6 = '{QtPyLib}' in {{'PySide6', 'PyQt6'}}
 
+        print("Instantiating QApplication...", file=sys.stderr)
         app = QApplication(sys.argv)
+
+        print("Creating window...", file=sys.stderr)
         window = QWidget()
         window.setWindowTitle('Hello world!')
         window.show()
 
-        # Exit Qt when the main loop becomes idle.
-        QTimer.singleShot(0, app.exit)
+        # Exit the application 5 seconds after entering the main loop.
+        # Emit a debug message every second until shutdown to show that application's main loop is processing events
+        # after the application window is shown.
+        for i in range(5):
+            QTimer.singleShot(i * 1000, lambda i=i: print(f"Timer event at {{i}} second(s)!", file=sys.stderr))
 
+        def _shutdown_program():
+            print("Shutting down application from timer callback...", file=sys.stderr)
+            app.exit()
+
+        QTimer.singleShot(5000, _shutdown_program)
+
+        print("Entering application's main loop...", file=sys.stderr)
         if is_qt6:
             # Qt6: exec_() is deprecated in PySide6 and removed from PyQt6 in favor of exec()
             res = app.exec()
         else:
             res = app.exec_()
+        print("Exited application's main loop!", file=sys.stderr)
+
+        print("Calling sys.exit()...", file=sys.stderr)
         sys.exit(res)
-        """.format(QtPyLib), **USE_WINDOWED_KWARG
+        """, **USE_WINDOWED_KWARG
     )
 
 
-@PYQT5_NEED_OPENGL
 @QtPyLibs
 def test_Qt_QtQml(pyi_builder, QtPyLib):
+    # Qt6 6.6.3 split Qt Quick Controls 2 styles into separate shared libraries, and both PySide6 6.6.3 and PyQt6 6.6.3
+    # PyPI wheels failed to account for that. Skip this test if running with affected version.
+    if QtPyLib == 'PyQt6':
+        # With PyQt6, the shared libraries are missing on Windows and Linux, but not on macOS.
+        if not is_darwin and check_requirement('PyQt6-Qt6 == 6.6.3'):
+            pytest.skip('PyQt6-Qt6 6.6.3 is missing shared libraries required by Qt Quick Controls 2.')
+    if QtPyLib == 'PySide6':
+        # With PySide6, all OSes seem to be affected.
+        if check_requirement('PySide6-Essentials == 6.6.3'):
+            pytest.skip('PySide6-Essentials 6.6.3 is missing shared libraries required by Qt Quick Controls 2.')
+
     pyi_builder.test_source(
-        """
+        f"""
         import sys
 
-        from {0}.QtGui import QGuiApplication
-        from {0}.QtQml import QQmlApplicationEngine
-        from {0}.QtCore import QTimer, QUrl
+        from {QtPyLib}.QtGui import QGuiApplication
+        from {QtPyLib}.QtQml import QQmlApplicationEngine
+        from {QtPyLib}.QtCore import QTimer, QUrl
 
-        is_qt6 = '{0}' in {{'PyQt6', 'PySide6'}}
+        is_qt6 = '{QtPyLib}' in {{'PyQt6', 'PySide6'}}
 
         # Select a style via the `command line
         # <https://doc.qt.io/qt-5/qtquickcontrols2-styles.html#command-line-argument>`_,
@@ -115,8 +141,13 @@ def test_Qt_QtQml(pyi_builder, QtPyLib):
         # https://github.com/pyinstaller/pyinstaller/issues/3711.
         #
         # In Qt5, the style name is lower case ('imagine'), whereas in Qt6, it is capitalized ('Imagine')
+        print("Instantiating QGuiApplication...", file=sys.stderr)
         app = QGuiApplication(sys.argv + ['-style', 'Imagine' if is_qt6 else 'imagine'])
+
+        print("Instantiating QQmlApplicationEngine...", file=sys.stderr)
         engine = QQmlApplicationEngine()
+
+        print("Loading application QML...", file=sys.stderr)
         engine.loadData(b'''
             import QtQuick 2.11
             import QtQuick.Controls 2.4
@@ -128,56 +159,112 @@ def test_Qt_QtQml(pyi_builder, QtPyLib):
             ''', QUrl())
 
         if not engine.rootObjects():
-            sys.exit(-1)
+            raise RuntimeError("No root objects loaded from QML!")
 
-        # Exit Qt when the main loop becomes idle.
-        QTimer.singleShot(0, app.exit)
+        # Exit the application 5 seconds after entering the main loop.
+        # Emit a debug message every second until shutdown to show that application's main loop is processing events
+        # after the application window is shown.
+        for i in range(5):
+            QTimer.singleShot(i * 1000, lambda i=i: print(f"Timer event at {{i}} second(s)!", file=sys.stderr))
 
+        def _shutdown_program():
+            print("Shutting down application from timer callback...", file=sys.stderr)
+            app.exit()
+
+        QTimer.singleShot(5000, _shutdown_program)
+
+        print("Entering application's main loop...", file=sys.stderr)
         if is_qt6:
             # Qt6: exec_() is deprecated in PySide6 and removed from PyQt6 in favor of exec()
             res = app.exec()
         else:
             res = app.exec_()
+        print("Exited application's main loop!", file=sys.stderr)
+
         del engine
+
+        print("Calling sys.exit()...", file=sys.stderr)
         sys.exit(res)
-        """.format(QtPyLib), **USE_WINDOWED_KWARG
+        """, **USE_WINDOWED_KWARG
     )
 
 
 @QtPyLibs
 def test_Qt_QtNetwork_SSL_support(pyi_builder, QtPyLib):
     # Skip the test if QtNetwork does not support SSL (e.g., due to lack of compatible OpenSSL shared library on the
-    # test system).
+    # test system). Starting with Qt 6.1, different backends provide TLS functionality, so explicitly check if
+    # 'openssl' backend is available.
     @isolated.decorate
-    def check_ssl_support(package):
+    def check_openssl_support(package):
         import sys
         import importlib
+
         QtCore = importlib.import_module('.QtCore', package)
         QtNetwork = importlib.import_module('.QtNetwork', package)
-        app = QtCore.QCoreApplication(sys.argv)  # noqa: F841
-        return QtNetwork.QSslSocket.supportsSsl()
 
-    if not check_ssl_support(QtPyLib):
-        pytest.skip('QtNetwork does not support SSL on this platform.')
+        # We must initialize QCoreApplication before using QtNetwork
+        app = QtCore.QCoreApplication(sys.argv)  # noqa: F841
+
+        if not QtNetwork.QSslSocket.supportsSsl():
+            return False
+
+        # For Qt >= 6.1, check if `openssl` TLS backend is available
+        try:
+            qt_version = QtCore.QLibraryInfo.version().segments()
+        except AttributeError:
+            qt_version = []  # Qt <= 5.8
+
+        if qt_version < [6, 1]:
+            return True  # TLS backends not implemented yet
+
+        return 'openssl' in QtNetwork.QSslSocket.availableBackends()
+
+    if not check_openssl_support(QtPyLib):
+        pytest.skip('QtNetwork does not use OpenSSL.')
 
     pyi_builder.test_source(
-        """
+        f"""
         import sys
-        from {0}.QtCore import QCoreApplication
-        from {0}.QtNetwork import QSslSocket
+        from {QtPyLib}.QtCore import QCoreApplication, QLibraryInfo
+        from {QtPyLib}.QtNetwork import QSslSocket
+
         app = QCoreApplication(sys.argv)
-        assert QSslSocket.supportsSsl()
-        """.format(QtPyLib), **USE_WINDOWED_KWARG
+
+        # Make sure SSL is supported
+        assert QSslSocket.supportsSsl(), "SSL not supported!"
+
+        # Display OpenSSL info
+        print(
+            f"OpenSSL build version: {{QSslSocket.sslLibraryBuildVersionNumber():X}} "
+            f"({{QSslSocket.sslLibraryBuildVersionString()}})"
+        )
+        print(
+            f"OpenSSL run-time version: {{QSslSocket.sslLibraryVersionNumber():X}} "
+            f"({{QSslSocket.sslLibraryVersionString()}})"
+        )
+
+        # Obtain Qt version
+        try:
+            qt_version = QLibraryInfo.version().segments()
+        except AttributeError:
+            qt_version = []  # Qt <= 5.8
+
+        # If Qt supports TLS backends (>= 6.1), make sure OpenSSL backend is available.
+        if qt_version >= [6, 1]:
+            print(f"Active TLS backend: {{QSslSocket.activeBackend()}}")
+            print(f"Available TLS backends: {{QSslSocket.availableBackends()}}")
+            assert 'openssl' in QSslSocket.availableBackends(), "OpenSSL TLS backend not available!"
+        """, **USE_WINDOWED_KWARG
     )
 
 
 @QtPyLibs
 def test_Qt_QTranslate(pyi_builder, QtPyLib):
     pyi_builder.test_source(
-        """
+        f"""
         import sys
-        from {0}.QtWidgets import QApplication
-        from {0}.QtCore import QTranslator, QLocale, QLibraryInfo
+        from {QtPyLib}.QtWidgets import QApplication
+        from {QtPyLib}.QtCore import QTranslator, QLocale, QLibraryInfo
 
         # Initialize Qt default translations
         app = QApplication(sys.argv)
@@ -197,29 +284,26 @@ def test_Qt_QTranslate(pyi_builder, QtPyLib):
         else:
             print('Qt locale %s not found!' % locale.name())
             assert False
-        """.format(QtPyLib)
+        """
     )
 
 
-@PYQT5_NEED_OPENGL
 @QtPyLibs
-def test_Qt_Ui_file(tmpdir, pyi_builder, data_dir, QtPyLib):
-    # Note that including the data_dir fixture copies files needed by this test.
+def test_Qt_Ui_file(pyi_builder, data_dir, QtPyLib):
     pyi_builder.test_source(
-        """
+        f"""
         import os
         import sys
 
-        import {0}.QtQuickWidgets  # Used instead of hiddenimports
+        import {QtPyLib}.QtQuickWidgets  # Used instead of hiddenimports
 
-        from {0}.QtWidgets import QApplication, QWidget
-        from {0}.QtCore import QTimer
+        from {QtPyLib}.QtWidgets import QApplication, QWidget
+        from {QtPyLib}.QtCore import QTimer
 
-        from pyi_get_datadir import get_data_dir
+        is_qt6 = '{QtPyLib}' in {{'PyQt6', 'PySide6'}}
+        is_pyqt = '{QtPyLib}' in {{'PyQt5', 'PyQt6'}}
 
-        is_qt6 = '{0}' in {{'PyQt6', 'PySide6'}}
-        is_pyqt = '{0}' in {{'PyQt5', 'PyQt6'}}
-
+        print("Instantiating QApplication...", file=sys.stderr)
         app = QApplication(sys.argv)
 
         # In Qt6, QtQuick supports multiple render APIs and automatically selects one.
@@ -228,36 +312,52 @@ def test_Qt_Ui_file(tmpdir, pyi_builder, data_dir, QtPyLib):
         if is_qt6:
             try:
                 # This seems to be unsupported on macOS version of PySide6 at the time of writing (6.1.0)
-                from {0}.QtQuick import QQuickWindow, QSGRendererInterface
+                from {QtPyLib}.QtQuick import QQuickWindow, QSGRendererInterface
                 QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.OpenGL)
             except Exception:
                 pass
 
         # Load the UI
-        ui_file = os.path.join(get_data_dir(), 'Qt_Ui_file', 'gui.ui')
+        print("Loading application UI...", file=sys.stderr)
+        ui_file = os.path.join(os.path.dirname(__file__), 'gui.ui')
         if is_pyqt:
             # Use PyQt.uic
-            from {0} import uic
+            from {QtPyLib} import uic
             window = QWidget()
             uic.loadUi(ui_file, window)
         else:
             # Use PySide.QtUiTools.QUiLoader
-            from {0}.QtUiTools import QUiLoader
+            from {QtPyLib}.QtUiTools import QUiLoader
             loader = QUiLoader()
             window = loader.load(ui_file)
         window.show()
 
-        # Exit Qt when the main loop becomes idle.
-        QTimer.singleShot(0, app.exit)
+        # Exit the application 5 seconds after entering the main loop.
+        # Emit a debug message every second until shutdown to show that application's main loop is processing events
+        # after the application window is shown.
+        for i in range(5):
+            QTimer.singleShot(i * 1000, lambda i=i: print(f"Timer event at {{i}} second(s)!", file=sys.stderr))
+
+        def _shutdown_program():
+            print("Shutting down application from timer callback...", file=sys.stderr)
+            app.exit()
+
+        QTimer.singleShot(5000, _shutdown_program)
 
         # Run the main loop
+        print("Entering application's main loop...", file=sys.stderr)
         if is_qt6:
             # Qt6: exec_() is deprecated in PySide6 and removed from PyQt6 in favor of exec()
             res = app.exec()
         else:
             res = app.exec_()
+        print("Exited application's main loop!", file=sys.stderr)
+
+        print("Calling sys.exit()...", file=sys.stderr)
         sys.exit(res)
-        """.format(QtPyLib)
+        """,
+        # Collect the .ui file into top-level application directory.
+        pyi_args=['--add-data', f"{data_dir / 'gui.ui'}:."],
     )
 
 
@@ -275,29 +375,66 @@ def test_Qt_Ui_file(tmpdir, pyi_builder, data_dir, QtPyLib):
 @skipif(os.environ.get('APPVEYOR') == 'True', reason='The Appveyor OS is incompatible with PyQt.Qt.')
 @requires('PyQt5')
 @pytest.mark.skipif(
-    is_module_satisfies('PyQt5 == 5.11.3') and is_darwin,
-    reason='This version of the OS X wheel does not include QWebEngine.'
+    check_requirement('PyQt5 == 5.11.3') and is_darwin,
+    reason='This version of the macOS wheel does not include QWebEngine.'
 )
 def test_PyQt5_Qt(pyi_builder):
     pyi_builder.test_source('from PyQt5.Qt import QLibraryInfo', **USE_WINDOWED_KWARG)
 
 
+# QtWebEngine tests
+
+
+# On linux systems with glibc >= 2.34, QtWebEngine helper process crashes with SIGSEGV due to use of `clone3` syscall,
+# which is incompatible with chromium sandbox (see QTBUG-96214). The issue was fixed in Qt5 5.15.7, however even the
+# latest PyPI wheels of PySide2 (5.15.2.1) and PyQt5/PyQtWebEngine (5.15.6) still seem to ship Qt5 5.15.2 (which was
+# probably last publicly available linux build from the Qt itself). If we encounter incompatible combination of
+# glibc and Qt5 (for example, using PyPI wheels under Ubuntu 22.04), we disable the sandbox, which allows us to perform
+# basic functionality test.
+def _disable_qtwebengine_sandbox(qt_flavor):
+    if is_linux:
+        import platform
+
+        # Check glibc version
+        libc_name, libc_version = platform.libc_ver()
+        if libc_name != 'glibc':
+            return False
+        try:
+            libc_version = [int(v) for v in libc_version.split('.')]
+        except Exception:
+            return False
+        if libc_version < [2, 34]:
+            return False
+
+        # Check Qt version
+        qt_info = get_qt_library_info(qt_flavor)
+        if qt_info.version and qt_info.version >= [5, 15, 7]:
+            return False
+
+        # Incompatible glibc and Qt5 version
+        return True
+
+    return False
+
+
 # Run the the QtWebEngineWidgets test for chosen Qt-based package flavor.
 def _test_Qt_QtWebEngineWidgets(pyi_builder, qt_flavor):
-    if is_darwin:
-        # QtWebEngine on Mac OS only works with a onedir build -- onefile builds do not work.
-        # Skip the test execution for onefile builds.
-        if pyi_builder._mode != 'onedir':
-            pytest.skip('QtWebEngine on macOS is supported only in onedir mode.')
-
-    source = """
+    disable_sandbox = _disable_qtwebengine_sandbox(qt_flavor)
+    pyi_builder.test_source(
+        f"""
         import sys
 
-        from {0}.QtWidgets import QApplication
-        from {0}.QtWebEngineWidgets import QWebEngineView
-        from {0}.QtCore import QTimer
+        # Disable QtWebEngine/chromium sanbox, if necessary
+        if {disable_sandbox}:
+            import os
+            print("Disabling QtWebEngine/Chromium sandbox (QTWEBENGINE_DISABLE_SANDBOX=1)...", file=sys.stderr)
+            os.environ['QTWEBENGINE_DISABLE_SANDBOX'] = '1'
 
-        is_qt6 = '{0}' in {{'PyQt6', 'PySide6'}}
+        from {qt_flavor}.QtWidgets import QApplication
+        from {qt_flavor}.QtWebEngineWidgets import QWebEngineView
+        from {qt_flavor}.QtCore import QTimer
+
+        is_qt6 = '{qt_flavor}' in {{'PyQt6', 'PySide6'}}
 
         # Web page to display
         WEB_PAGE_HTML = '''
@@ -314,6 +451,7 @@ def _test_Qt_QtWebEngineWidgets(pyi_builder, qt_flavor):
             </html>
         '''
 
+        print("Instantiating QApplication...", file=sys.stderr)
         app = QApplication(sys.argv)
 
         class JSResultTester:
@@ -338,12 +476,15 @@ def _test_Qt_QtWebEngineWidgets(pyi_builder, qt_flavor):
 
             def verify_and_quit(self):
                 # Make sure the renderer process is alive.
+                print("Checking the result of renderer process...", file=sys.stderr)
                 if self.result != self.EXPECTED:
                     raise ValueError(
                         f"JS result is {{self.result!r}} but expected {{self.EXPECTED!r}}. "
                         "Is the QtWebEngine renderer process running properly?")
+                print("Exiting application's main loop...", file=sys.stderr)
                 app.quit()
 
+        print("Instantiating QWebEngineView and loading test web page...", file=sys.stderr)
         view = QWebEngineView()
         view.setHtml(WEB_PAGE_HTML)
         view.show()
@@ -351,41 +492,54 @@ def _test_Qt_QtWebEngineWidgets(pyi_builder, qt_flavor):
         js_result_tester = JSResultTester()
         js_result_tester.setup(view)
 
+        print("Entering application's main loop...", file=sys.stderr)
         if is_qt6:
             # Qt6: exec_() is deprecated in PySide6 and removed from PyQt6 in favor of exec()
             res = app.exec()
         else:
             res = app.exec_()
-        sys.exit(res)
-        """.format(qt_flavor)
+        print("Exited application's main loop!", file=sys.stderr)
 
-    pyi_builder.test_source(source, **USE_WINDOWED_KWARG)
+        print("Calling sys.exit()...", file=sys.stderr)
+        sys.exit(res)
+        """, **USE_WINDOWED_KWARG
+    )
 
 
 # Run the the QtWebEngineQuick test for chosen Qt-based package flavor.
 def _test_Qt_QtWebEngineQuick(pyi_builder, qt_flavor):
-    if is_darwin:
-        # QtWebEngine on Mac OS only works with a onedir build -- onefile builds do not work.
-        # Skip the test execution for onefile builds.
-        if pyi_builder._mode != 'onedir':
-            pytest.skip('QtWebEngine on macOS is supported only in onedir mode.')
-
-    source = """
+    disable_sandbox = _disable_qtwebengine_sandbox(qt_flavor)
+    pyi_builder.test_source(
+        f"""
         import sys
 
-        from {0}.QtGui import QGuiApplication
-        from {0}.QtQml import QQmlApplicationEngine
+        # Disable QtWebEngine/chromium sanbox, if necessary
+        if {disable_sandbox}:
+            import os
+            print("Disabling QtWebEngine/Chromium sandbox (QTWEBENGINE_DISABLE_SANDBOX=1)...", file=sys.stderr)
+            os.environ['QTWEBENGINE_DISABLE_SANDBOX'] = '1'
 
-        is_qt6 = '{0}' in {{'PyQt6', 'PySide6'}}
+        from {qt_flavor}.QtGui import QGuiApplication
+        from {qt_flavor}.QtQml import QQmlApplicationEngine
+
+        is_qt6 = '{qt_flavor}' in {{'PyQt6', 'PySide6'}}
 
         if is_qt6:
-            from {0}.QtWebEngineQuick import QtWebEngineQuick
+            from {qt_flavor}.QtWebEngineQuick import QtWebEngineQuick
         else:
-            from {0}.QtWebEngine import QtWebEngine as QtWebEngineQuick
+            from {qt_flavor}.QtWebEngine import QtWebEngine as QtWebEngineQuick
+
+        # Must be called before QGuiApplication is instantiated!
+        print("Initializing QtWebEngineQuick...", file=sys.stderr)
         QtWebEngineQuick.initialize()
 
+        print("Instantiating QGuiApplication...", file=sys.stderr)
         app = QGuiApplication(sys.argv)
+
+        print("Instantiating QQmlApplicationEngine...", file=sys.stderr)
         engine = QQmlApplicationEngine()
+
+        print("Loading application QML...", file=sys.stderr)
         engine.loadData(b'''
             import QtQuick 2.0
             import QtQuick.Window 2.0
@@ -396,43 +550,59 @@ def _test_Qt_QtWebEngineQuick(pyi_builder, qt_flavor):
                 WebEngineView {{
                     id: view
                     anchors.fill: parent
-                    Component.onCompleted: loadHtml('
-                        <!doctype html>
-                        <html lang="en">
-                            <head>
-                                <meta charset="utf-8">
-                                <title>Test web page</title>
-                            </head>
-                            <body>
-                                <p>This is a test web page.</p>
-                            </body>
-                        </html>
-                    ')
-                }}
-                Connections {{
-                    target: view
-                    function onLoadingChanged(loadRequest) {{
+                    Component.onCompleted: () => {{
+                        console.info("Loading HTML...")
+                        loadHtml('
+                            <!doctype html>
+                            <html lang="en">
+                                <head>
+                                    <meta charset="utf-8">
+                                    <title>Test web page</title>
+                                </head>
+                                <body>
+                                    <p>This is a test web page.</p>
+                                </body>
+                            </html>
+                        ')
+                    }}
+                    onLoadingChanged: (loadRequest) => {{
+                        console.info("Web page loading status changed: " + loadRequest.status)
                         if (loadRequest.status !== WebEngineView.LoadStartedStatus) {{
-                            Qt.quit()
+                            console.info("Page loading finished; running shutdown timer (" + timer.interval + " ms)!")
+                            timer.running = true
                         }}
+                    }}
+                }}
+                Timer {{
+                    id: timer
+                    interval: 1000
+                    running: false
+                    repeat: false
+                    onTriggered: () => {{
+                        console.info("Shutdown timer triggered; exiting application's main loop...")
+                        Qt.quit()
                     }}
                 }}
             }}
         ''')
 
         if not engine.rootObjects():
-            sys.exit(-1)
+            raise RuntimeError("No root objects loaded from QML!")
 
+        print("Entering application's main loop...", file=sys.stderr)
         if is_qt6:
             # Qt6: exec_() is deprecated in PySide6 and removed from PyQt6 in favor of exec()
             res = app.exec()
         else:
             res = app.exec_()
-        del engine
-        sys.exit(res)
-        """.format(qt_flavor)
+        print("Exited application's main loop!", file=sys.stderr)
 
-    pyi_builder.test_source(source, **USE_WINDOWED_KWARG)
+        del engine
+
+        print("Calling sys.exit()...", file=sys.stderr)
+        sys.exit(res)
+        """, **USE_WINDOWED_KWARG
+    )
 
 
 @requires('PyQt5')
@@ -459,20 +629,44 @@ def test_Qt_QtWebEngineQuick_PySide2(pyi_builder):
 
 @requires('PyQt6 >= 6.2.2')
 @requires('PyQt6-WebEngine')  # NOTE: base Qt6 must be 6.2.2 or newer, QtWebEngine can be older
+@pytest.mark.flaky(
+    # Attempt to mitigate issues with QtWebEngine 6.10.1
+    condition=force_flaky_rerun or check_requirement('PyQt6-WebEngine-Qt6 == 6.10.1'),
+    reruns=1,
+)
 def test_Qt_QtWebEngineWidgets_PyQt6(pyi_builder):
     _test_Qt_QtWebEngineWidgets(pyi_builder, 'PyQt6')
 
 
 @requires('PyQt6 >= 6.2.2')
 @requires('PyQt6-WebEngine')  # NOTE: base Qt6 must be 6.2.2 or newer, QtWebEngine can be older
+@pytest.mark.skipif(
+    check_requirement('PyQt6-Qt6 == 6.6.0'),
+    reason='PyQt6 6.6.0 PyPI wheels are missing Qt6WebChannelQuick shared library.'
+)
+@pytest.mark.skipif(
+    check_requirement('PyQt6-Qt6 == 6.6.3') and is_win,
+    reason='PyQt6 6.6.3 PyPI wheels for Windows are missing Qt6WebChannelQuick shared library.'
+)
+@pytest.mark.flaky(
+    # The generated .app bundle seems to sporadically freeze during shutdown on GHA macos-14 runners.
+    # Attempt to mitigate issues with QtWebEngine 6.10.1
+    condition=force_flaky_rerun or is_darwin or check_requirement('PyQt6-WebEngine-Qt6 == 6.10.1'),
+    reruns=1,
+)
 def test_Qt_QtWebEngineQuick_PyQt6(pyi_builder):
     _test_Qt_QtWebEngineQuick(pyi_builder, 'PyQt6')
 
 
 @requires('PySide6 >= 6.2.2')
 @pytest.mark.skipif(
-    is_module_satisfies('PySide6 == 6.5.0') and is_win,
+    check_requirement('PySide6 == 6.5.0') and is_win,
     reason='PySide6 6.5.0 PyPI wheels for Windows are missing opengl32sw.dll.'
+)
+@pytest.mark.flaky(
+    # Attempt to mitigate issues with QtWebEngine 6.10.1
+    condition=force_flaky_rerun or check_requirement('PySide6 == 6.10.1'),
+    reruns=1,
 )
 def test_Qt_QtWebEngineWidgets_PySide6(pyi_builder):
     _test_Qt_QtWebEngineWidgets(pyi_builder, 'PySide6')
@@ -480,8 +674,14 @@ def test_Qt_QtWebEngineWidgets_PySide6(pyi_builder):
 
 @requires('PySide6 >= 6.2.2')
 @pytest.mark.skipif(
-    is_module_satisfies('PySide6 == 6.5.0') and is_win,
+    check_requirement('PySide6 == 6.5.0') and is_win,
     reason='PySide6 6.5.0 PyPI wheels for Windows are missing opengl32sw.dll.'
+)
+@pytest.mark.flaky(
+    # The generated .app bundle seems to sporadically freeze during shutdown on GHA macos-14 runners.
+    # Attempt to mitigate issues with QtWebEngine 6.10.1
+    condition=force_flaky_rerun or is_darwin or check_requirement('PySide6 == 6.10.1'),
+    reruns=1,
 )
 def test_Qt_QtWebEngineQuick_PySide6(pyi_builder):
     _test_Qt_QtWebEngineQuick(pyi_builder, 'PySide6')
@@ -490,15 +690,21 @@ def test_Qt_QtWebEngineQuick_PySide6(pyi_builder):
 # QtMultimedia test that triggers error when the module's plugins are missing (#7352).
 @QtPyLibs
 def test_Qt_QtMultimedia_player_init(pyi_builder, QtPyLib):
+    # QtMultimedia in PyQt6-Qt6 6.7.1 does not seem to be compatible with PyQt6 6.7.0 (the PyQt6-Qt6 6.7.1 update was
+    # pushed on Jun 2 2024 without PyQt6 itself being updated).
+    if QtPyLib == 'PyQt6':
+        if check_requirement('PyQt6-Qt6 == 6.7.1') and check_requirement('PyQt6 == 6.7.0'):
+            pytest.skip('QtMultimedia is broken under PyQt6 6.7.0 and PyQt6-Qt6 6.7.1.')
+
     pyi_builder.test_source(
-        """
+        f"""
         import sys
 
-        from {0} import QtCore, QtMultimedia
+        from {QtPyLib} import QtCore, QtMultimedia
 
         app = QtCore.QCoreApplication(sys.argv)
         player = QtMultimedia.QMediaPlayer(app)
-        """.format(QtPyLib), **USE_WINDOWED_KWARG
+        """, **USE_WINDOWED_KWARG
     )
 
 
@@ -514,13 +720,13 @@ def test_Qt_QtMultimedia_player_init(pyi_builder, QtPyLib):
 ])
 def test_Qt_QtMultimedia_with_true_property(pyi_builder, QtPyLib):
     pyi_builder.test_source(
-        """
+        f"""
         import sys
-        from {0} import QtCore, QtMultimedia
+        from {QtPyLib} import QtCore, QtMultimedia
         from __feature__ import true_property
 
         app = QtCore.QCoreApplication(sys.argv)
-        """.format(QtPyLib), **USE_WINDOWED_KWARG
+        """, **USE_WINDOWED_KWARG
     )
 
 
@@ -579,27 +785,27 @@ def _test_qt_bindings_import(bindings, module, pyi_builder_onedir):
 
 @importorskip('PySide2')
 @pytest.mark.parametrize('module', _list_all_qt_submodules('PySide2'))
-@pytest.mark.parametrize('pyi_builder', ['onedir'], indirect=True)
+@onedir_only
 def test_qt_module_import_PySide2(module, pyi_builder):
     _test_qt_bindings_import("PySide2", module, pyi_builder)
 
 
 @importorskip('PySide6')
 @pytest.mark.parametrize('module', _list_all_qt_submodules('PySide6'))
-@pytest.mark.parametrize('pyi_builder', ['onedir'], indirect=True)
+@onedir_only
 def test_qt_module_import_PySide6(module, pyi_builder):
     _test_qt_bindings_import("PySide6", module, pyi_builder)
 
 
 @importorskip('PyQt5')
 @pytest.mark.parametrize('module', _list_all_qt_submodules('PyQt5'))
-@pytest.mark.parametrize('pyi_builder', ['onedir'], indirect=True)
+@onedir_only
 def test_qt_module_import_PyQt5(module, pyi_builder):
     _test_qt_bindings_import("PyQt5", module, pyi_builder)
 
 
 @importorskip('PyQt6')
 @pytest.mark.parametrize('module', _list_all_qt_submodules('PyQt6'))
-@pytest.mark.parametrize('pyi_builder', ['onedir'], indirect=True)
+@onedir_only
 def test_qt_module_import_PyQt6(module, pyi_builder):
     _test_qt_bindings_import("PyQt6", module, pyi_builder)

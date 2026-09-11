@@ -19,9 +19,9 @@ import struct
 import sys
 import zlib
 
-from PyInstaller.building.utils import get_code_object, strip_paths_in_code
+from PyInstaller.building.utils import get_code_object, replace_filename_in_code_object
 from PyInstaller.compat import BYTECODE_MAGIC, is_win, strict_collect_mode
-from PyInstaller.loader.pyimod01_archive import PYZ_ITEM_DATA, PYZ_ITEM_MODULE, PYZ_ITEM_NSPKG, PYZ_ITEM_PKG
+from PyInstaller.loader.pyimod01_archive import PYZ_ITEM_MODULE, PYZ_ITEM_NSPKG, PYZ_ITEM_PKG
 
 
 class ZlibArchiveWriter:
@@ -31,21 +31,18 @@ class ZlibArchiveWriter:
     """
     _PYZ_MAGIC_PATTERN = b'PYZ\0'
     _HEADER_LENGTH = 12 + 5
-    _COMPRESSION_LEVEL = 6  # zlib compression level
+    _COMPRESSION_LEVEL = int(os.environ.get("PYINSTALLER_ZLIB_COMPRESSION_LEVEL", 6))  # zlib compression level
 
-    def __init__(self, filename, entries, code_dict=None, cipher=None):
+    def __init__(self, filename, entries, code_dict=None):
         """
         filename
             Target filename of the archive.
         entries
             An iterable containing entries in the form of tuples: (name, src_path, typecode), where `name` is the name
             under which the resource is stored (e.g., python module name, without suffix), `src_path` is name of the
-            file from which the resource is read, and `typecode` is the Analysis-level TOC typecode (`PYMODULE` or
-            `DATA`).
+            file from which the resource is read, and `typecode` is the Analysis-level TOC typecode (`PYMODULE`).
         code_dict
             Optional code dictionary containing code objects for analyzed/collected python modules.
-        cipher
-            Optional `Cipher` object for bytecode encryption.
         """
         code_dict = code_dict or {}
 
@@ -56,7 +53,7 @@ class ZlibArchiveWriter:
             # Write entries' data and collect TOC entries
             toc = []
             for entry in entries:
-                toc_entry = self._write_entry(fp, entry, code_dict, cipher)
+                toc_entry = self._write_entry(fp, entry, code_dict)
                 toc.append(toc_entry)
 
             # Write TOC
@@ -68,42 +65,42 @@ class ZlibArchiveWriter:
             #  - PYZ magic pattern (4 bytes)
             #  - python bytecode magic pattern (4 bytes)
             #  - TOC offset (32-bit int, 4 bytes)
-            #  - encryption flag (1 byte)
             #  - 4 unused bytes
             fp.seek(0, os.SEEK_SET)
 
             fp.write(self._PYZ_MAGIC_PATTERN)
             fp.write(BYTECODE_MAGIC)
             fp.write(struct.pack('!i', toc_offset))
-            fp.write(struct.pack('!B', cipher is not None))
 
     @classmethod
-    def _write_entry(cls, fp, entry, code_dict, cipher):
+    def _write_entry(cls, fp, entry, code_dict):
         name, src_path, typecode = entry
+        assert typecode in {'PYMODULE', 'PYMODULE-1', 'PYMODULE-2'}
 
-        if typecode == 'PYMODULE':
-            typecode = PYZ_ITEM_MODULE
-            if src_path in ('-', None):
-                # This is a NamespacePackage, modulegraph marks them by using the filename '-'. (But wants to use None,
-                # so check for None, too, to be forward-compatible.)
-                typecode = PYZ_ITEM_NSPKG
-            else:
-                src_basename, _ = os.path.splitext(os.path.basename(src_path))
-                if src_basename == '__init__':
-                    typecode = PYZ_ITEM_PKG
-            data = marshal.dumps(code_dict[name])
+        if src_path in {'-', None}:
+            # PEP-420 namespace package; these do not have code objects, but we still need an entry in PYZ to inform our
+            # run-time module finder/loader of the package's existence. So create a TOC entry for 0-byte data blob,
+            # and write no data.
+            return (name, (PYZ_ITEM_NSPKG, fp.tell(), 0))
+
+        code_object = code_dict[name]
+
+        src_basename, _ = os.path.splitext(os.path.basename(src_path))
+        if src_basename == '__init__':
+            typecode = PYZ_ITEM_PKG
+            co_filename = os.path.join(*name.split('.'), '__init__.py')
         else:
-            # Any data files, that might be required by pkg_resources.
-            typecode = PYZ_ITEM_DATA
-            with open(src_path, 'rb') as fh:
-                data = fh.read()
-            # No need to use forward slash as path-separator here since pkg_resources on Windows uses back slash as
-            # path-separator.
+            typecode = PYZ_ITEM_MODULE
+            co_filename = os.path.join(*name.split('.')) + '.py'
+
+        # Replace co_filename on code object with anonymized version without absolute path to the module.
+        code_object = replace_filename_in_code_object(code_object, co_filename)
+
+        # Serialize
+        data = marshal.dumps(code_object)
 
         # First compress, then encrypt.
         obj = zlib.compress(data, cls._COMPRESSION_LEVEL)
-        if cipher:
-            obj = cipher.encrypt(obj)
 
         # Create TOC entry
         toc_entry = (name, (typecode, fp.tell(), len(obj)))
@@ -126,13 +123,13 @@ class CArchiveWriter:
     _COOKIE_MAGIC_PATTERN = b'MEI\014\013\012\013\016'
 
     # For cookie and TOC entry structure, see `PyInstaller.archive.readers.CArchiveReader`.
-    _COOKIE_FORMAT = '!8sIIii64s'
+    _COOKIE_FORMAT = '!8sIIII64s'
     _COOKIE_LENGTH = struct.calcsize(_COOKIE_FORMAT)
 
-    _TOC_ENTRY_FORMAT = '!iIIIBB'
+    _TOC_ENTRY_FORMAT = '!IIIIBc'
     _TOC_ENTRY_LENGTH = struct.calcsize(_TOC_ENTRY_FORMAT)
 
-    _COMPRESSION_LEVEL = 9  # zlib compression level
+    _COMPRESSION_LEVEL = int(os.environ.get("PYINSTALLER_ZLIB_COMPRESSION_LEVEL", 9))  # zlib compression level
 
     def __init__(self, filename, entries, pylib_name):
         """
@@ -180,6 +177,11 @@ class CArchiveWriter:
     def _write_entry(self, fp, entry):
         dest_name, src_name, compress, typecode = entry
 
+        # Write OPTION entries as-is, without normalizing them. This also exempts them from duplication check,
+        # allowing them to be specified multiple times.
+        if typecode == 'o':
+            return self._write_blob(fp, b"", dest_name, typecode)
+
         # Ensure forward slashes in paths are on Windows converted to back slashes '\\', as on Windows the bootloader
         # works only with back slashes.
         dest_name = os.path.normpath(dest_name)
@@ -188,12 +190,17 @@ class CArchiveWriter:
             # manually.
             dest_name = dest_name.replace(os.path.sep, '\\')
 
+            # For symbolic link entries, also ensure that the symlink target path (stored in src_name) is using
+            # Windows-style back slash separators.
+            if typecode == 'n':
+                src_name = src_name.replace(os.path.sep, '\\')
+
         # Strict pack/collect mode: keep track of the destination names, and raise an error if we try to add a duplicate
         # (a file with same destination name, subject to OS case normalization rules).
         if strict_collect_mode:
             normalized_dest = None
-            if type in ('o', 's', 'm', 'M'):
-                # Exempt options, python source script, and modules from the check
+            if typecode in {'s', 's1', 's2', 'm', 'M'}:
+                # Exempt python source scripts and modules from the check.
                 pass
             else:
                 # Everything else; normalize the case
@@ -206,29 +213,44 @@ class CArchiveWriter:
                     )
                 self._collected_names.add(normalized_dest)
 
-        if typecode == 'o':
-            return self._write_blob(fp, b"", dest_name, typecode)
-        elif typecode == 'd':
+        if typecode == 'd':
             # Dependency; merge src_name (= reference path prefix) and dest_name (= name) into single-string format that
             # is parsed by bootloader.
             return self._write_blob(fp, b"", f"{src_name}:{dest_name}", typecode)
-        elif typecode == 's':
+        elif typecode in {'s', 's1', 's2'}:
             # If it is a source code file, compile it to a code object and marshal the object, so it can be unmarshalled
-            # by the bootloader.
-            code = get_code_object(dest_name, src_name)
-            code = strip_paths_in_code(code)
-            return self._write_blob(fp, marshal.dumps(code), dest_name, typecode, compress=compress)
+            # by the bootloader. For that, we need to know target optimization level, which is stored in typecode.
+            optim_level = {'s': 0, 's1': 1, 's2': 2}[typecode]
+            code = get_code_object(dest_name, src_name, optimize=optim_level)
+            # Construct new `co_filename` by taking destination name, and replace its suffix with the one from the code
+            # object's co_filename; this should cover all of the following cases:
+            #  - run-time hook script: the source name has a suffix (that is also present in `co_filename` produced by
+            #    `get_code_object`), destination name has no suffix.
+            #  - entry-point script with a suffix: both source name and destination name have the same suffix (and the
+            #    same suffix is also in `co_filename` produced by `get_code_object`)
+            #  - entry-point script without a suffix: neither source name nor destination name have a suffix, but
+            #    `get_code_object` adds a .py suffix to `co_filename` to mitigate potential issues with POSIX
+            #    executables and `traceback` module; we want to preserve this behavior.
+            co_filename = os.path.splitext(dest_name)[0] + os.path.splitext(code.co_filename)[1]
+            code = replace_filename_in_code_object(code, co_filename)
+            return self._write_blob(fp, marshal.dumps(code), dest_name, 's', compress=compress)
         elif typecode in ('m', 'M'):
-            # Read the PYC file
+            # Read the PYC file. We do not perform compilation here (in contrast to script files in the above branch),
+            # so typecode does not contain optimization level information.
             with open(src_name, "rb") as in_fp:
                 data = in_fp.read()
             assert data[:4] == BYTECODE_MAGIC
             # Skip the PYC header, load the code object.
             code = marshal.loads(data[16:])
-            code = strip_paths_in_code(code)
+            co_filename = dest_name + '.py'  # Use dest name with added .py suffix.
+            code = replace_filename_in_code_object(code, co_filename)
             # These module entries are loaded and executed within the bootloader, which requires only the code
             # object, without the PYC header.
             return self._write_blob(fp, marshal.dumps(code), dest_name, typecode, compress=compress)
+        elif typecode == 'n':
+            # Symbolic link; store target name (as NULL-terminated string)
+            data = src_name.encode('utf-8') + b'\x00'
+            return self._write_blob(fp, data, dest_name, typecode, compress=compress)
         else:
             return self._write_file(fp, src_name, dest_name, typecode, compress=compress)
 
@@ -293,7 +315,7 @@ class CArchiveWriter:
                 compressed_length,
                 data_length,
                 compress,
-                ord(typecode),
+                typecode.encode('ascii'),
                 name,
             )
             serialized_toc.append(serialized_entry)
@@ -312,42 +334,73 @@ class SplashWriter:
     # Whereas script and image fields are binary data, the requirements fields describe an array of strings. Each string
     # is null-terminated in order to easily iterate over this list from within C.
     #
-    #   typedef struct _splash_data_header {
-    #       char tcl_libname[16];  /* Name of tcl library, e.g. tcl86t.dll */
-    #       char tk_libname[16];   /* Name of tk library, e.g. tk86t.dll */
-    #       char tk_lib[16];       /* Tk Library generic, e.g. "tk/" */
-    #       char rundir[16];       /* temp folder inside extraction path in
-    #                               * which the dependencies are extracted */
+    # typedef struct _splash_data_header
+    # {
+    #     char tcl_shared_library_name[32];
+    #     char tk_shared_library_name[32];
+    #     char tcl_module_directory_name[32];
+    #     char tk_module_directory_name[32];
     #
-    #       int script_len;        /* Length of the script */
-    #       int script_offset;     /* Offset (rel to start) of the script */
+    #     uint32_t script_len;
+    #     uint32_t script_offset;
     #
-    #       int image_len;         /* Length of the image data */
-    #       int image_offset;      /* Offset (rel to start) of the image */
+    #     uint32_t image_len;
+    #     uint32_t image_offset;
     #
-    #       int requirements_len;
-    #       int requirements_offset;
+    #     uint32_t requirements_len;
+    #     uint32_t requirements_offset;
     #
-    #   } SPLASH_DATA_HEADER;
+    #     uint32_t centering_mode;
+    # } SPLASH_DATA_HEADER;
     #
-    _HEADER_FORMAT = '!16s 16s 16s 16s ii ii ii'
+    _HEADER_FORMAT = '!32s 32s 32s 32s II II II I'
     _HEADER_LENGTH = struct.calcsize(_HEADER_FORMAT)
+
+    # Centering mode values - keep in sync with values defined in `bootloader/src/pyi_splash.h`!
+    _SPLASH_CENTER_DEFAULT = 0
+    _SPLASH_CENTER_VIRTUAL_SCREEN = 1
+    _SPLASH_CENTER_PRIMARY_SCREEN = 2
+    _SPLASH_CENTER_ACTIVE_SCREEN = 3
 
     # The created archive is compressed by the CArchive, so no need to compress the data here.
 
-    def __init__(self, filename, name_list, tcl_libname, tk_libname, tklib, rundir, image, script):
+    def __init__(
+        self,
+        filename,
+        requirements_list,
+        tcl_shared_library_name,
+        tk_shared_library_name,
+        tcl_module_directory_name,
+        tk_module_directory_name,
+        image,
+        script,
+        center_mode,
+    ):
         """
         Writer for splash screen resources that are bundled into the CArchive as a single archive/entry.
 
         :param filename: The filename of the archive to create
-        :param name_list: List of filenames for the requirements array
-        :param str tcl_libname: Name of the tcl shared library file
-        :param str tk_libname: Name of the tk shared library file
-        :param str tklib: Root of tk library (e.g. tk/)
-        :param str rundir: Unique path to extract requirements to
+        :param requirements_list: List of filenames for the requirements array
+        :param str tcl_shared_library_name: Basename of the Tcl shared library
+        :param str tk_shared_library_name: Basename of the Tk shared library
+        :param str tcl_module_directory_name: Basename of the Tcl module directory (e.g., tcl/)
+        :param str tk_module_directory_name: Basename of the Tk module directory (e.g., tk/)
         :param Union[str, bytes] image: Image like object
         :param str script: The tcl/tk script to execute to create the screen.
+        :param str center_mode: Splash screen centering mode (integer value that matches enum used by bootloader)
         """
+
+        # Ensure forward slashes in dependency names are on Windows converted to back slashes '\\', as on Windows the
+        # bootloader works only with back slashes.
+        def _normalize_filename(filename):
+            filename = os.path.normpath(filename)
+            if is_win and os.path.sep == '/':
+                # When building under MSYS, the above path normalization uses Unix-style separators, so replace them
+                # manually.
+                filename = filename.replace(os.path.sep, '\\')
+            return filename
+
+        requirements_list = [_normalize_filename(name) for name in requirements_list]
 
         with open(filename, "wb") as fp:
             # Reserve space for the header.
@@ -358,7 +411,7 @@ class SplashWriter:
             # null-byte, that keeps the list short memory wise and makes it iterable from C.
             requirements_len = 0
             requirements_offset = fp.tell()
-            for name in name_list:
+            for name in requirements_list:
                 name = name.encode('utf-8') + b'\0'
                 fp.write(name)
                 requirements_len += len(name)
@@ -383,19 +436,33 @@ class SplashWriter:
                 fp.write(image_data)
                 del image_data
 
+            # The following strings are written to 16-character fields with zero-padding, which means that we need to
+            # ensure that their length is strictly below 16 characters (if it were exactly 16, the field would have no
+            # terminating NULL character!).
+            def _encode_str(value, field_name, limit):
+                enc_value = value.encode("utf-8")
+                if len(enc_value) >= limit:
+                    raise ValueError(
+                        f"Length of the encoded field {field_name!r} ({len(enc_value)}) is greater or equal to the "
+                        f"limit of {limit} characters!"
+                    )
+
+                return enc_value
+
             # Write header
             header_data = struct.pack(
                 self._HEADER_FORMAT,
-                tcl_libname.encode("utf-8"),
-                tk_libname.encode("utf-8"),
-                tklib.encode("utf-8"),
-                rundir.encode("utf-8"),
+                _encode_str(tcl_shared_library_name, 'tcl_shared_library_name', 32),
+                _encode_str(tk_shared_library_name, 'tk_shared_library_name', 32),
+                _encode_str(tcl_module_directory_name, 'tcl_module_directory_name', 32),
+                _encode_str(tk_module_directory_name, 'tk_module_directory_name', 32),
                 script_len,
                 script_offset,
                 image_len,
                 image_offset,
                 requirements_len,
                 requirements_offset,
+                center_mode,
             )
 
             fp.seek(0, os.SEEK_SET)

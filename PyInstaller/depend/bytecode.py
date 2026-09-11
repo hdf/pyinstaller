@@ -1,4 +1,13 @@
-# -*- coding: utf-8 -*-
+#-----------------------------------------------------------------------------
+# Copyright (c) 2021-2023, PyInstaller Development Team.
+#
+# Distributed under the terms of the GNU General Public License (version 2
+# or later) with exception for distributing the bootloader.
+#
+# The full license is in the file COPYING.txt, distributed with this software.
+#
+# SPDX-License-Identifier: (GPL-2.0-or-later WITH Bootloader-exception)
+#-----------------------------------------------------------------------------
 """
 Tools for searching bytecode for key statements that indicate the need for additional resources, such as data files
 and package metadata.
@@ -91,17 +100,7 @@ def finditer(pattern: Pattern, string: bytes):
 # themselves need to be enclosed in another (non-capturing) group. E.g., "(?:(?:_OPCODES_FUNCTION_GLOBAL).)".
 # NOTE2: _OPCODES_EXTENDED_ARG2 is an exception, as it is used as a list of opcodes to exclude, i.e.,
 # "[^_OPCODES_EXTENDED_ARG2]". Therefore, multiple opcodes are not separated by the OR operator.
-if not compat.is_py37:
-    _OPCODES_EXTENDED_ARG = rb"`EXTENDED_ARG`"
-    _OPCODES_EXTENDED_ARG2 = _OPCODES_EXTENDED_ARG
-    _OPCODES_FUNCTION_GLOBAL = rb"`LOAD_NAME`|`LOAD_GLOBAL`|`LOAD_FAST`"
-    _OPCODES_FUNCTION_LOAD = rb"`LOAD_ATTR`"
-    _OPCODES_FUNCTION_ARGS = rb"`LOAD_CONST`"
-    _OPCODES_FUNCTION_CALL = rb"`CALL_FUNCTION`|`CALL_FUNCTION_EX`"
-
-    def _cleanup_bytecode_string(bytecode):
-        return bytecode  # Nothing to do here
-elif not compat.is_py311:
+if not compat.is_py311:
     # Python 3.7 introduced two new function-related opcodes, LOAD_METHOD and CALL_METHOD
     _OPCODES_EXTENDED_ARG = rb"`EXTENDED_ARG`"
     _OPCODES_EXTENDED_ARG2 = _OPCODES_EXTENDED_ARG
@@ -112,7 +111,7 @@ elif not compat.is_py311:
 
     def _cleanup_bytecode_string(bytecode):
         return bytecode  # Nothing to do here
-else:
+elif not compat.is_py312:
     # Python 3.11 removed CALL_FUNCTION and CALL_METHOD, and replaced them with PRECALL + CALL instruction sequence.
     # As both PRECALL and CALL have the same parameter (the argument count), we need to match only up to the PRECALL.
     # The CALL_FUNCTION_EX is still present.
@@ -131,6 +130,51 @@ else:
 
     def _cleanup_bytecode_string(bytecode):
         return _cache_instruction_filter.sub(rb"\2", bytecode)
+else:
+    # Python 3.12 merged EXTENDED_ARG_QUICK back in to EXTENDED_ARG, and LOAD_METHOD in to LOAD_ATTR
+    # PRECALL is no longer a valid key
+    _OPCODES_EXTENDED_ARG = rb"`EXTENDED_ARG`"
+    _OPCODES_EXTENDED_ARG2 = _OPCODES_EXTENDED_ARG
+    if compat.is_py314:
+        # Python 3.14.0a7 added LOAD_FAST_BORROW.
+        _OPCODES_FUNCTION_GLOBAL = rb"`LOAD_NAME`|`LOAD_GLOBAL`|`LOAD_FAST`|`LOAD_FAST_BORROW`"
+    else:
+        _OPCODES_FUNCTION_GLOBAL = rb"`LOAD_NAME`|`LOAD_GLOBAL`|`LOAD_FAST`"
+    _OPCODES_FUNCTION_LOAD = rb"`LOAD_ATTR`"
+    if compat.is_py314:
+        # Python 3.14.0a2 split LOAD_CONST into LOAD_CONST, LOAD_CONST_IMMORTAL, and LOAD_SMALL_INT.
+        # https://github.com/python/cpython/commit/faa3272fb8d63d481a136cc0467a0cba6ed7b264
+        #
+        # The LOAD_CONST_IMMORTAL was removed in Python 3.15.0a1
+        # https://github.com/python/cpython/commit/6dcb0fdfe0a2de083f0f1f9a568dd0a19541b863
+        #
+        # LOAD_COMMON_CONSTANT was added in Python 3.14.0a1...
+        # https://github.com/python/cpython/commit/98e855fcc1f1d490c803565e84cb611b3f057e45
+        # and was extended with additional common constants in 3.15.0b1
+        # https://github.com/python/cpython/commit/7c9ad27dd1fc9e05149b471b055f18ad64cd05f3
+        if not compat.is_py315:
+            _OPCODES_FUNCTION_ARGS = rb"`LOAD_CONST`|`LOAD_SMALL_INT`|`LOAD_COMMON_CONSTANT`|`LOAD_CONST_IMMORTAL`"
+        else:
+            _OPCODES_FUNCTION_ARGS = rb"`LOAD_CONST`|`LOAD_SMALL_INT`|`LOAD_COMMON_CONSTANT`"
+    else:
+        _OPCODES_FUNCTION_ARGS = rb"`LOAD_CONST`"
+    _OPCODES_FUNCTION_CALL = rb"`CALL`|`CALL_FUNCTION_EX`"
+
+    # In Python 3.13, PUSH_NULL opcode is emitted after the LOAD_NAME (and after LOAD_ATTR opcode(s), if applicable).
+    # In python 3.11 and 3.12, it was emitted before the LOAD_NAME, and thus fell outside of our regex matching; now,
+    # we have to deal with it. But, instead of trying to add it to matching rules and adjusting the post-processing
+    # to deal with it, we opt to filter them out (at the same time as we filter out CACHE opcodes), and leave the rest
+    # of processing untouched.
+    if compat.is_py313:
+        _cache_instruction_filter = bytecode_regex(rb"(`CACHE`.)|(`PUSH_NULL`.)|(..)")
+
+        def _cleanup_bytecode_string(bytecode):
+            return _cache_instruction_filter.sub(rb"\3", bytecode)
+    else:
+        _cache_instruction_filter = bytecode_regex(rb"(`CACHE`.)|(..)")
+
+        def _cleanup_bytecode_string(bytecode):
+            return _cache_instruction_filter.sub(rb"\2", bytecode)
 
 
 # language=PythonVerboseRegExp
@@ -215,9 +259,29 @@ def load(raw: bytes, code: CodeType) -> str:
         # Then this is a literal.
         return code.co_consts[index]
     # Otherwise, it is a global name.
-    if raw[-2] == opmap["LOAD_GLOBAL"] and compat.is_py311:
+    if compat.is_py311 and raw[-2] == opmap["LOAD_GLOBAL"]:
         # In python 3.11, namei>>1 is pushed on stack...
         return code.co_names[index >> 1]
+    if compat.is_py312 and raw[-2] == opmap["LOAD_ATTR"]:
+        # In python 3.12, namei>>1 is pushed on stack...
+        return code.co_names[index >> 1]
+    if compat.is_py314 and raw[-2] == opmap["LOAD_SMALL_INT"]:
+        # python 3.14 introduced LOAD_SMALL_INT, which pushes its argument (int value < 256) on the stack
+        return index
+    if compat.is_py314 and not compat.is_py315 and raw[-2] == opmap["LOAD_CONST_IMMORTAL"]:
+        # python 3.14 introduced LOAD_CONST_IMMORTAL, which pushes co_consts[consti] on the stack. This is intended to
+        # be a variant of LOAD_CONST for constants that are known to be immortal. This specialized opcode was removed
+        # in python 3.15.
+        return code.co_consts[index]
+    if compat.is_py314 and raw[-2] == opmap["LOAD_FAST_BORROW"]:
+        # python 3.14 introduced LOAD_FAST_BORROW, which pushes a borrowed reference to the local co_varnames[var_num]
+        # onto the stack.
+        return code.co_varnames[index]
+    if compat.is_py314 and raw[-2] == opmap["LOAD_COMMON_CONSTANT"]:
+        # python 3.14 introduced LOAD_COMMON_CONSTANT, which pushes an identifier of a pre-defined constant onto the
+        # stack. Python 3.15 added more such constants - including None, True, False, and -1.
+        return dis._common_constants[index]
+
     return code.co_names[index]
 
 

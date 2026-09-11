@@ -58,7 +58,6 @@ Only the following command-line options have an effect when building from a spec
 * :option:`--distpath`
 * :option:`--workpath`
 * :option:`--noconfirm`
-* :option:`--ascii`
 * :option:`--clean`
 * :option:`--log-level`
 
@@ -73,7 +72,6 @@ the ``pyinstaller`` command executes the spec file as code.
 Your bundled application is created by the execution of the spec file.
 The following is a shortened example of a spec file for a minimal, one-folder app::
 
-    block_cipher = None
     a = Analysis(['minimal.py'],
              pathex=['/Developer/PItests/minimal'],
              binaries=None,
@@ -81,10 +79,8 @@ The following is a shortened example of a spec file for a minimal, one-folder ap
              hiddenimports=[],
              hookspath=None,
              runtime_hooks=None,
-             excludes=None,
-             cipher=block_cipher)
-    pyz = PYZ(a.pure, a.zipped_data,
-             cipher=block_cipher)
+             excludes=None)
+    pyz = PYZ(a.pure)
     exe = EXE(pyz,... )
     coll = COLLECT(...)
 
@@ -166,11 +162,9 @@ you could modify the spec file as follows::
              ...
              )
 
-And the command line equivalent (see
-:ref:`What To Bundle, Where To Search`
-for platform-specific details)::
+And the command line equivalent::
 
-    pyinstaller --add-data 'src/README.txt:.' myscript.py
+    pyinstaller --add-data "src/README.txt:." myscript.py
 
 You have made the ``datas=`` argument a one-item list.
 The item is a tuple in which the first string says the existing file
@@ -299,11 +293,9 @@ You could add it to the bundle this way::
              binaries=[ ( '/usr/lib/libiodbc.2.dylib', '.' ) ],
              ...
 
-Or via the command line (again, see
-:ref:`What To Bundle, Where To Search`
-for platform-specific details)::
+Or via the command line::
 
-    pyinstaller --add-binary '/usr/lib/libiodbc.2.dylib:.' myscript.py
+    pyinstaller --add-binary "/usr/lib/libiodbc.2.dylib:." myscript.py
 
 If you wish to store ``libiodbc.2.dylib`` on a specific folder inside the bundle,
 for example ``vendor``, then you could specify it, using the second element of the tuple::
@@ -324,48 +316,116 @@ files to the bundle that may be useful for special cases.
 See :ref:`The TOC and Tree Classes` below.
 
 
-.. _giving run-time python options:
+.. _specifying python interpreter options:
 
-Giving Run-time Python Options
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Specifying Python Interpreter Options
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can pass command-line options to the Python interpreter.
-The interpreter takes a number of command-line options but only the
-following are supported for a bundled app:
+PyInstaller-frozen application runs the application code in isolated,
+embedded Python interpreter. Therefore, **the typical means of passing
+options to Python interpreter do not apply**, including:
 
-* ``v`` to write a message to stdout each time a module is initialized.
+* `environment variables <https://docs.python.org/3/using/cmdline.html#environment-variables>`_
+  (such as `PYTHONUTF8` and `PYTHONHASHSEED`) - because the frozen
+  application is supposed to be isolated from python environment that
+  might be present on the target system
 
-* ``u`` for unbuffered stdio.
+* `command-line arguments <https://docs.python.org/3/using/cmdline.html#miscellaneous-options>`_
+  (such as `-v` and `-O`) -  because command-line arguments are reserved
+  for application.
 
-* ``W`` and an option to change warning behavior: ``W ignore`` or
-  ``W once`` or ``W error``.
+Instead, PyInstaller offers an option to specify permanent run-time
+options for the application's Python interpreter via its own ``OPTIONS``
+mechanism. To pass run-time options, create a list of three-element
+tuples: `('option string', None, 'OPTION')`, and pass it as an additional
+argument to `EXE` before the keyword arguments. The first element of the
+option tuple is the option string (see below for valid options), the
+second is always `None`, and the third is always `'OPTION'`.
 
-To pass one or more of these options,
-create a list of tuples, one for each option, and pass the list as
-an additional argument to the EXE call.
-Each tuple has three elements:
+An example spec file, modified to specify two run-time options::
 
-* The option as a string, for example ``v`` or ``W ignore``.
+    options = [
+        ('v', None, 'OPTION'),
+        ('W ignore', None, 'OPTION'),
+    ]
 
-* None
-
-* The string ``OPTION``
-
-For example modify the spec file this way::
-
-    options = [ ('v', None, 'OPTION'), ('W ignore', None, 'OPTION') ]
-    a = Analysis( ...
-                )
+    a = Analysis(
+        ...
+    )
     ...
-    exe = EXE(pyz,
-          a.scripts,
-          options,   <--- added line
-          exclude_binaries=...
-          )
+    exe = EXE(
+        pyz,
+        a.scripts,
+        options,  # <-- the options list, passed to EXE
+        exclude_binaries=...
+        ...
+    )
 
-.. Note:: The unbuffered stdio mode (the ``u`` option) enables unbuffered
-   binary layer of ``stdout`` and ``stderr`` streams on all supported Python
-   versions. The unbuffered text layer requires Python 3.7 or later.
+The following options are supported by this mechanism:
+
+* ``'v'`` or ``'verbose'``: increment the value of ``sys.flags.verbose``,
+  which causes messages to be written to stdout each time a module is
+  initialized. This option is equivalent to Python's ``-v`` command-line
+  option. It is automatically enabled when :ref:`verbose imports
+  <getting python's verbose imports>` are enabled via PyInstaller's own
+  ``--debug imports`` option.
+
+* ``'u'`` or ``'unbuffered'``: enable unbuffered stdout and stderr. Equivalent
+  to Python's ``-u`` command-line option.
+
+* ``'O'`` or ``'optimize'``: increment the value of ``sys.flags.optimize``.
+  Equivalent to Python's ``-O`` command-line option.
+
+.. note::
+    The optimization level reflected by ``sys.flags.optimize`` affects
+    only bytecode that python interpreter would end up compiling at the
+    run time. In a PyInstaller-frozen application, however, most of
+    python modules are available as pre-compiled bytecode, hence the
+    run-time bytecode optimization level does not affect them at all.
+
+    For details on how to enforce the bytecode optimization level for
+    collected modules, see :ref:`bytecode optimization level`.
+
+* ``'W <arg>'``: a pass-through for `Python's W-options
+  <https://docs.python.org/3/using/cmdline.html#cmdoption-W>`_ that
+  control warning messages.
+
+* ``'X <arg>'``: a pass-through for `Python's X-options
+  <https://docs.python.org/3/using/cmdline.html#cmdoption-X>`_. The
+  ``utf8`` and ``dev`` X-options, which control UTF-8 mode and developer
+  mode, are explicitly parsed by PyInstaller's bootloader and used during
+  interpreter pre-initialization; the rest of X-options are just passed
+  on to the interpreter configuration.
+
+* ``'hash_seed=<value>'``: an option to set Python's hash seed within the
+  frozen application to a fixed value. Equivalent to ``PYTHONHASHSEED``
+  environment variable. At the time of writing, this does not exist as
+  an X-option, so it is implemented as a custom option.
+
+Further examples to illustrate the syntax::
+
+    options = [
+        # Warning control
+        ('W ignore', None, 'OPTION'),  # disable all warnings
+        ('W ignore::DeprecationWarning', None, 'OPTION')  # disable deprecation warnings
+
+        # UTF-8 mode; unless explicitly enabled/disabled, it is auto enabled based on locale
+        ('X utf8', None, 'OPTION),  # force UTF-8 mode on
+        ('X utf8=1', None, 'OPTION),  # force UTF-8 mode on
+        ('X utf8=0', None, 'OPTION),  # force UTF-8 mode off
+
+        # Developer mode; disabled by default
+        ('X dev', None, 'OPTION),  # enable dev mode
+        ('X dev=1', None, 'OPTION),  # enable dev mode
+
+        # Hash seed
+        ('hash_seed=0', None, 'OPTION'),  # disable hash randomization; sys.flags.hash_randomization=0
+        ('hash_seed=123', None, 'OPTION'),  # hash randomization with fixed seed value
+
+        # Force enable/disable GIL in python >= 3.13 built with Py_DISABLE_GIL / free-threading option (PEP-703)
+        ('X gil=1', None, 'OPTION),  # force-enable GIL
+        ('X gil=0', None, 'OPTION),  # force-disable GIL
+    ]
 
 
 .. _spec file options for a macOS bundle:
@@ -378,7 +438,7 @@ When you build a windowed macOS app
 the spec file contains an additional statement to
 create the macOS application bundle, or app folder::
 
-    app = BUNDLE(exe,
+    app = BUNDLE(coll,
              name='myscript.app',
              icon=None,
              bundle_identifier=None)
@@ -406,7 +466,7 @@ plistlib can handle nested Python objects (which are translated to nested
 XML), and translates Python data types to the proper :file:`Info.plist`
 XML types.  Here's an example::
 
-    app = BUNDLE(exe,
+    app = BUNDLE(coll,
              name='myscript.app',
              icon=None,
              bundle_identifier=None,
@@ -716,3 +776,110 @@ Other globals contain information about the build environment:
  mode: rst
  ispell-local-dictionary: "american"
  End:
+
+
+.. _spec_parameters:
+
+Adding parameters to spec files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sometimes, you may wish to have different build modes (e.g. a *debug* build and
+a *production* build) from the same spec file. Any command line arguments to
+``pyinstaller`` given after a ``--`` separator will not be parsed by PyInstaller
+and will instead be forwarded to the spec file where you can implement your own
+argument parsing and handle the options accordingly. For example, the following
+spec file will create a onedir application with console enabled if invoked via
+``pyinstaller example.spec -- --debug`` or a onefile console-less application if
+invoked with just ``pyinstaller example.spec``. If you use an :mod:`argparse`
+based parser rather than rolling your own using :data:`sys.argv` then
+``pyinstaller example.spec -- --help`` will display your spec options.
+
+.. code-block:: python
+
+    # example.spec
+
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
+    options = parser.parse_args()
+
+    a = Analysis(
+        ['example.py'],
+    )
+    pyz = PYZ(a.pure)
+
+    if options.debug:
+        exe = EXE(
+            pyz,
+            a.scripts,
+            exclude_binaries=True,
+            name='example',
+        )
+        coll = COLLECT(
+            exe,
+            a.binaries,
+            a.datas,
+            name='example_debug',
+        )
+    else:
+        exe = EXE(
+            pyz,
+            a.scripts,
+            a.binaries,
+            a.datas,
+            name='example',
+            console=False,
+        )
+
+
+Using shared code and configuration in spec files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The contents of the spec file are treated as Python executable code by
+PyInstaller; i.e., it is read and executed in a similar way as a regular
+Python script. Therefore, you can have your spec file import any Python
+module -- the ones from the standard library, 3rd party modules installed
+in ``site-packages`` directory, or your own modules.
+
+If you have multiple spec files (for example, one for each platform that
+you build the frozen application for), you may wish to extract common code
+and configuration into a dedicated python module that is placed next to
+the spec files. In such cases, it is important to note that the directory
+that contains the spec file is not automatically added to the Python
+search path; therefore, to make your shared module discoverable, you need
+to add the location of the spec file (stored by PyInstaller in the global
+``SPEC`` variable) to the list of search paths in :data:`sys.path` at the
+very top of the spec file:
+
+.. code-block:: python
+
+    # common_spec.py
+
+    datas = [
+        ('src/README.txt', '.'),
+        ('/mygame/data', 'data'),
+        ('/mygame/sfx/*.mp3', 'sfx')
+    ]
+
+.. code-block:: python
+
+    # example.spec
+
+    import sys
+    import os
+
+    # SPEC is defined by PyInstaller in the context in which the spec is executed
+    sys.path.insert(0, os.path.dirname(SPEC))
+
+    import common_spec
+
+    a = Analysis(
+        ['example.py'],
+        pathex=[],
+        binaries=[],
+        datas=common_spec.datas,
+    ...
+
+
+.. _common_spec_definitions:

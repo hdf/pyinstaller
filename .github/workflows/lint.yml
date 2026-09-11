@@ -1,16 +1,16 @@
 name: Lint
 
 on:
-  pull_request:  # Trigger on PRs to develop and v4
+  workflow_dispatch:  # Allow workflow to be manually triggered
+  pull_request:  # Trigger on PRs opened against develop branch
     branches:
       - develop
-      - v4
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
@@ -20,22 +20,22 @@ jobs:
         git fetch origin ${{ github.base_ref }}
         git fetch origin ${{ github.ref }}
         git checkout FETCH_HEAD --
+
+    # Prevent @rokm from accidentally adding U+02D9 characters instead of backticks.
+    - name: Ensure that no U+02D9 characters are present
+      run: "! git grep -I $'\u02d9'"
+
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
-        python-version: 3.8
+        python-version: 3.x
 
     - name: Install dependencies
-      run: pip install --upgrade ruff setuptools toml wheel yapf==0.32.0
+      run: pip install --upgrade flake8 yapf==0.43.0 toml
 
     - name: Test that yapf has been applied
       # If this check fails for your PR, run `yapf -rip .`
       run: yapf --recursive --parallel --diff .
 
     - name: Run Lint
-      run: ruff --format=github .
-
-    - name: Test Packaging
-      run: |
-        python setup.py sdist bdist_wheel
-        pip install -v .
+      run: flake8 .

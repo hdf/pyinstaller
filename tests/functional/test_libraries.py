@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #-----------------------------------------------------------------------------
 # Copyright (c) 2005-2023, PyInstaller Development Team.
 #
@@ -10,18 +9,11 @@
 # SPDX-License-Identifier: (GPL-2.0-or-later WITH Bootloader-exception)
 #-----------------------------------------------------------------------------
 
-import os
-
 import pytest
-import py
 
-from PyInstaller.compat import is_win, is_linux
-from PyInstaller.utils.tests import importorskip, xfail, skipif, requires
-from PyInstaller.utils.hooks import can_import_module
-
-# :todo: find a way to get this from `conftest` or such directory with testing modules used in some tests.
-_MODULES_DIR = py.path.local(os.path.abspath(__file__)).dirpath('modules')
-_DATA_DIR = py.path.local(os.path.abspath(__file__)).dirpath('data')
+from PyInstaller import compat
+from PyInstaller.utils.tests import importorskip, skipif, requires
+from PyInstaller.utils.hooks import can_import_module, tcl_tk
 
 
 @importorskip('gevent')
@@ -40,36 +32,122 @@ def test_gevent_monkey(pyi_builder):
         """)
 
 
+@importorskip('IPython')
+def test_ipython(pyi_builder, capfd):
+    pyi_builder.test_source(
+        """
+        import os
+        import sys
+
+        # Redirect sys.stdin to devnull to force IPython console to automatically exit
+        with open(os.devnull, 'r') as sys.stdin:
+            import IPython
+            print("Calling IPython.embed()...", file=sys.stderr)
+            IPython.embed(header="Hello from embedded IPython!")
+            print("End of program reached!", file=sys.stderr)
+        """
+    )
+
+    out, err = capfd.readouterr()
+    assert 'Hello from embedded IPython!' in out, \
+        f"Cannot find hello string in captured output:\n{out}"
+
+
 # The tkinter module may be available for import, but not actually importable due to missing shared libraries.
 # Therefore, we need to use `can_import_module`-based skip decorator instead of `@importorskip`.
 @pytest.mark.skipif(not can_import_module("tkinter"), reason="tkinter cannot be imported.")
-def test_tkinter(pyi_builder):
-    pyi_builder.test_script('pyi_lib_tkinter.py')
+def test_tkinter_tcl_library_dir(pyi_builder):
+    pyi_builder.test_source(
+        """
+        import sys
+        import pathlib
+        import tkinter
+
+        # Query the location of Tcl library/data directory.
+        tcl = tkinter.Tcl()
+        tcl_data_dir = tcl.eval("info library")
+
+        print(f"Tcl directory: {tcl_data_dir}", file=sys.stderr)
+
+        if tcl_data_dir == "//zipfs:/lib/tcl/tcl_library":
+            # Tcl/Tk 9 with data embedded in shared library
+            print("Tcl data is embedded in shared library!", file=sys.stderr)
+        elif (
+            sys.platform == 'darwin' and
+            tcl_data_dir == "/System/Library/Frameworks/Tcl.framework/Versions/8.5/Resources/Scripts"
+        ):
+            # macOS python build with system Tcl/Tk .framework
+            print("System Tcl/Tk .framework on macOS", file=sys.stderr)
+        else:
+            # Check that Tcl data directory is collected in frozen application
+            application_dir = pathlib.Path(sys._MEIPASS).resolve()
+            tcl_data_dir = pathlib.Path(tcl_data_dir).resolve()
+
+            if application_dir not in tcl_data_dir.parents:
+                raise SystemExit(
+                    f"Tcl data directory {str(tcl_data_dir)!r} is not located inside {str(application_dir)!r}"
+                )
+        """
+    )
 
 
-def test_pkg_resource_res_string(pyi_builder, monkeypatch):
-    # Include some data files for testing pkg_resources module.
-    datas = os.pathsep.join((str(_MODULES_DIR.join('pkg3', 'sample-data.txt')), 'pkg3'))
-    pyi_builder.test_script('pkg_resource_res_string.py', pyi_args=['--add-data', datas])
+# In contrast to test_tkinter_tcl_library_dir, which performs basic import test and verifies that the path to Tcl
+# library directory is set properly, this is a full functional test; we try to create a Tk window with label and
+# button, and register a timer to shut down the application. Doing so verifies that all Tcl/Tk files (e.g., .tcl
+# scripts from library directories) are properly collected.
+#
+# The prerequisite for this test is that tkinter can be used unfrozen, so check that this is indeed the case.
+def test_tkinter_functional(pyi_builder):
+    if not tcl_tk.tcltk_info.tkinter_fully_usable:
+        pytest.skip("tkinter is not fully usable.")
 
+    pyi_builder.test_source(
+        """
+        import tkinter
+        import tkinter.messagebox
 
-def test_pkgutil_get_data(pyi_builder, monkeypatch):
-    # Include some data files for testing pkg_resources module.
-    datas = os.pathsep.join((str(_MODULES_DIR.join('pkg3', 'sample-data.txt')), 'pkg3'))
-    pyi_builder.test_script('pkgutil_get_data.py', pyi_args=['--add-data', datas])
+        root = tkinter.Tk()
 
+        # Dump information about library/data directory.
+        tcl_dir = root.tk.exprstring('$tcl_library')
+        print(f"Run-time Tcl library/data directory: {tcl_dir}")
 
-@xfail(reason='Our import mechanism returns the wrong loader-class for __main__.')
-def test_pkgutil_get_data__main__(pyi_builder, monkeypatch):
-    # Include some data files for testing pkg_resources module.
-    datas = os.pathsep.join((str(_MODULES_DIR.join('pkg3', 'sample-data.txt')), 'pkg3'))
-    pyi_builder.test_script('pkgutil_get_data__main__.py', pyi_args=['--add-data', datas])
+        tk_dir = root.tk.exprstring('$tk_library')
+        print(f"Run-time Tk library/data directory: {tk_dir}")
+
+        # Create test GUI
+        label = tkinter.Label(root, text="Hello World")
+        label.pack()
+
+        def test_button_callback():
+            tkinter.messagebox.showinfo("Test", "Test message")
+
+        button = tkinter.Button(root, text="Test button", command=test_button_callback)
+        button.pack()
+
+        def shutdown_timer_callback():
+            print("Shutting down!")
+            root.destroy()
+
+        shutdown_interval = 1000  # ms
+        print(f"Starting shutdown timer ({shutdown_interval} ms)...")
+        root.after(shutdown_interval, shutdown_timer_callback)
+
+        print("Entering main loop...")
+        root.mainloop()
+
+        print("Done!")
+    """
+    )
 
 
 @importorskip('sphinx')
-def test_sphinx(tmpdir, pyi_builder, data_dir):
-    # Note that including the data_dir fixture copies files needed by this test
-    pyi_builder.test_script('pyi_lib_sphinx.py')
+def test_sphinx(pyi_builder, data_dir):
+    pyi_builder.test_script(
+        'pyi_lib_sphinx.py',
+        # Pass the path to temporary copy of data directory via command-line arguments.
+        app_args=[str(data_dir)],
+    )
 
 
 @importorskip('pygments')
@@ -116,7 +194,7 @@ def test_idlelib(pyi_builder):
 
 @importorskip('keyring')
 @skipif(
-    is_linux,
+    compat.is_linux,
     reason="SecretStorage backend on linux requires active D-BUS session and initialized keyring, and may "
     "need to unlock the keyring via UI prompt."
 )
@@ -147,11 +225,15 @@ def test_pytz(pyi_builder):
 
 
 @importorskip('requests')
-def test_requests(tmpdir, pyi_builder, data_dir, monkeypatch):
-    # Note that including the data_dir fixture copies files needed by this test.
-    # Include the data files.
-    datas = os.pathsep.join((str(data_dir.join('*')), os.curdir))
-    pyi_builder.test_script('pyi_lib_requests.py', pyi_args=['--add-data', datas])
+@skipif(
+    compat.is_cygwin,
+    reason="ssl server is broken on cygwin until https://github.com/python/cpython/pull/150419 is released/back-ported."
+)
+def test_requests(pyi_builder, data_dir):
+    # NOTE: including the `data_dir` fixture copies files needed by this test!
+    # We collect the data into frozen application.
+    add_data_arg = f"{data_dir / '*'}:."
+    pyi_builder.test_script('pyi_lib_requests.py', pyi_args=['--add-data', add_data_arg])
 
 
 @importorskip('urllib3.packages.six')
@@ -288,7 +370,7 @@ def test_pyexcelerate(pyi_builder):
 
 
 @importorskip('usb')
-@pytest.mark.skipif(is_linux, reason='libusb_exit segfaults on some linuxes')
+@pytest.mark.skipif(compat.is_linux, reason='libusb_exit segfaults on some linuxes')
 def test_usb(pyi_builder):
     # See if the usb package is supported on this platform.
     try:
@@ -314,54 +396,6 @@ def test_zeep(pyi_builder):
         # Test the hook to zeep
         from zeep import utils
         utils.get_version()
-        """
-    )
-
-
-@importorskip('PIL')
-#@pytest.mark.xfail(reason="Fails with Pillow 3.0.0")
-def test_pil_img_conversion(pyi_builder):
-    datas = os.pathsep.join((str(_DATA_DIR.join('PIL_images')), '.'))
-    pyi_builder.test_script(
-        'pyi_lib_PIL_img_conversion.py',
-        pyi_args=[
-            '--add-data', datas,
-            # Use console mode or else on Windows the VS() messageboxes will stall pytest.
-            '--console'
-        ]
-    )  # yapf: disable
-
-
-@requires("pillow >= 1.1.6")
-@importorskip('PyQt5')
-def test_pil_PyQt5(pyi_builder):
-    # hook-PIL is excluding PyQt5, but is must still be included since it is imported elsewhere.
-    # Also see issue #1584.
-    pyi_builder.test_source("""
-        import PyQt5
-        import PIL
-        import PIL.ImageQt
-        """)
-
-
-@importorskip('PIL')
-def test_pil_plugins(pyi_builder):
-    pyi_builder.test_source(
-        """
-        # Verify packaging of PIL.Image.
-        from PIL.Image import frombytes
-        print(frombytes)
-
-        # PIL import hook should bundle all available PIL plugins. Verify that plugins are collected.
-        from PIL import Image
-        Image.init()
-        MIN_PLUG_COUNT = 7  # Without all plugins the count is usually 6.
-        plugins = list(Image.SAVE.keys())
-        plugins.sort()
-        if len(plugins) < MIN_PLUG_COUNT:
-            raise SystemExit('No PIL image plugins were collected!')
-        else:
-            print('PIL supported image formats: %s' % plugins)
         """
     )
 
@@ -407,12 +441,12 @@ def test_pandas_plotting_matplotlib(pyi_builder):
 
 
 @importorskip('win32ctypes')
-@pytest.mark.skipif(not is_win, reason='pywin32-ctypes is supported only on Windows')
+@pytest.mark.skipif(not compat.is_win, reason='pywin32-ctypes is supported only on Windows')
 @pytest.mark.parametrize('submodule', ['win32api', 'win32cred', 'pywintypes'])
 def test_pywin32ctypes(pyi_builder, submodule):
-    pyi_builder.test_source("""
-        from win32ctypes.pywin32 import {0}
-        """.format(submodule))
+    pyi_builder.test_source(f"""
+        from win32ctypes.pywin32 import {submodule}
+        """)
 
 
 @importorskip('setuptools')
@@ -420,3 +454,18 @@ def test_setuptools(pyi_builder):
     pyi_builder.test_source("""
         import setuptools
         """)
+
+
+@importorskip('babel')
+def test_babel(pyi_builder):
+    # Try to format a date/time in order to ensure that data files from babel's locale-data directory (especially
+    # root.dat) can be unpickled.
+    pyi_builder.test_source(
+        """
+        import datetime
+        from babel.dates import format_datetime
+
+        datetime_obj = datetime.datetime(2007, 4, 1, 15, 30)
+        print(format_datetime(datetime_obj, 'full', locale='fr_FR'))
+        """
+    )

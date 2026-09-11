@@ -33,39 +33,50 @@ These helpers are documented below.
 
 The name of a hook file is :file:`hook-{full.import.name}.py`,
 where *full.import.name* is
-the fully-qualified name of an imported script or module.
+the fully-qualified name of an imported module.
+For example, ``hook-PyQt5.QtCore.py`` is a hook file corresponding to
+the module ``PyQt5.QtCore``. When your script (or one of its dependencies)
+contains ``import PyQt5.QtCore`` (or ``from PyQt5 import QtCore``),
+Analysis notes that ``hook-PyQt5.QtCore.py`` exists, and will call it.
+
 You can browse through the existing hooks in the
 ``hooks`` folder of the PyInstaller distribution folder
 and see the names of the packages for which hooks have been written.
-For example ``hook-PyQt5.QtCore.py`` is a hook file telling
-about hidden imports needed by the module ``PyQt5.QtCore``.
-When your script contains ``import PyQt5.QtCore``
-(or ``from PyQt5 import QtCore``),
-Analysis notes that ``hook-PyQt5.QtCore.py`` exists, and will call it.
+Additional hooks are provided by the ``pyinstaller-hooks-contrib``
+package, which is typically installed as part of PyInstaller dependencies.
+See `here <https://github.com/pyinstaller/pyinstaller/tree/develop/PyInstaller/hooks>`__
+to browse PyInstaller-provided hooks in the online repository,
+and `here <https://github.com/pyinstaller/pyinstaller-hooks-contrib/tree/master/_pyinstaller_hooks_contrib/stdhooks>`__
+for hooks provided by the ``pyinstaller-hooks-contrib``.
 
 Many hooks consist of only one statement, an assignment to ``hiddenimports``.
-For example, the hook for the `dnspython`_ package, called
-``hook-dns.rdata.py``, has only this statement::
+For example, the ``xml.dom`` module from Python standard library imports
+a module called ``xml.dom.domreg``, which in turn indirectly imports
+``xml.dom.minidom`` as one of registered XML DOM implementations.
+Therefore, to ensure that this implementation module
+is collected, PyInstaller provides a hook called
+``hook-xml.dom.domreg.py``, which contains only the following statement::
 
-    hiddenimports = [
-        "dns.rdtypes.*",
-        "dns.rdtypes.ANY.*"
-    ]
+    hiddenimports = ["xml.dom.minidom"]
 
-When Analysis sees ``import dns.rdata`` or ``from dns import rdata``
-it calls ``hook-dns.rdata.py`` and examines its value
-of ``hiddenimports``.
-As a result, it is as if your source script also contained::
+When Analysis sees an ``import xml.dom`` statement in the user code (or
+one of its dependencies), and subsequently sees that ``xml.dom`` module
+imports the ``xml.dom.domreg`` module (via the
+``from .domreg import getDOMImplementation, registerDOMImplementation``
+statement), it calls ``hook-xml.dom.domreg.py``, and examines the value
+of ``hiddenimports`` hook global variable set by the hook.
+As a result, the ``xml.dom.minidom`` module is collected into the frozen
+application, as if the ``xml.dom.domreg`` module (or your source script)
+contained a direct ``import xml.dom.minidom`` statement.
 
-    import dns.rdtypes.*
-    import dsn.rdtypes.ANY.*
-
-A hook can also cause the addition of data files,
-and it can cause certain files to *not* be imported.
+A hook can also cause the collection of data files or binaries (shared
+libraries) from a package, collection of metadata for a package, and it
+can also prevent collection of packages/modules that are imported only
+from the hooked module or a package.
 Examples of these actions are shown below.
 
-When the module that needs these hidden imports is useful only to your project,
-store the hook file(s) somewhere near your source file.
+When the module that needs a hook is useful only to your project,
+you can store the hook file(s) somewhere near your source file.
 Then specify their location to the ``pyinstaller`` or ``pyi-makespec``
 command with the :option:`--additional-hooks-dir` option.
 If the hook file(s) are at the same level as the script,
@@ -76,7 +87,8 @@ the command could be simply::
 If you write a hook for a module used by others,
 please ask the package developer to
 :ref:`include the hook with her/his package <provide hooks with package>`
-or send us the hook file so we can make it available.
+or send us the hook file so we can include it in `the contributed
+hooks repository <https://github.com/pyinstaller/pyinstaller-hooks-contrib>`__.
 
 
 How a Hook Is Loaded
@@ -339,6 +351,54 @@ applies them to the bundle being created.
    can be modified using the `set_module_collection_mode method`_ from
    the ``hook_api`` object instead of setting the global hook variable.
 
+.. _bindepend symlink suppression:
+
+``bindepend_symlink_suppression``
+   An option for hooks to prevent the PyInstaller's binary dependency
+   analysis process from creating a symbolic link to top-level application
+   directory for specific shared library. Has effect only on platforms
+   where such symbolic links are created.
+
+   The value can be either a string (single path or pattern), a list of
+   strings, or a set of strings. During binary dependency analysis,
+   the discovered shared library's source path is matched against all
+   patterns that have been set by hooks to determine whether the symbolic
+   link should be created or not.
+
+   This mechanism is intended to be used in specific cases to work around
+   issues caused by symbolic links created by binary dependency analysis;
+   for example, when such a library tries to look up its location, but
+   does not fully resolve the obtained path.
+
+   Example::
+
+      # hook-mypackage.py
+
+      import os
+      from PyInstaller import compat
+      from PyInstaller.utils.hooks import get_module_file_attribute
+
+      # On linux, suppress creation of symbolic links to top-level application
+      # directory for all shared libraries collected from the package's directory.
+      if compat.is_linux:
+         package_dir = os.path.dirname(get_module_file_attribute('mypackage'))
+         bindepend_symlink_suppression = os.path.join(package_dir, "*.so*")
+
+   Example::
+
+      # hook-mypackage.py
+
+      from PyInstaller import compat
+
+      # On linux, suppress creation of symbolic links to top-level application
+      # directory for shared libraries bundled with this package in its two
+      # library subdirectories.
+      if compat.is_linux:
+         bindepend_symlink_suppression = [
+            "**/mypackage/lib_dir1/*.so*",
+            "**/mypackage/lib_dir2/*.so*",
+         ]
+
 
 Useful Items in ``PyInstaller.compat``
 ----------------------------------------
@@ -421,6 +481,7 @@ hooks.
 
 .. autofunction:: exec_statement
 .. autofunction:: eval_statement
+.. autofunction:: check_requirement
 .. autofunction:: is_module_satisfies
 .. autofunction:: collect_all
 .. autofunction:: collect_submodules
@@ -503,7 +564,7 @@ which has the following immutable properties:
       * A non-package module or C extension, this is the absolute path of the
         corresponding file.
 
-:attr:`__path__`:
+``__path__``:
    A list of the absolute paths of all directories comprising the module
    if it is a package, or ``None``. Typically the list contains only the
    absolute path of the package's directory.
@@ -540,6 +601,12 @@ The ``hook_api`` object also offers the following methods:
    current hook's context! The collection mode may be set for the hooked
    package, its sub-module or sub-package, or for other packages. If ``name``
    is ``None``, it is substituted with the hooked package/module name.
+
+``add_bindepend_symlink_suppression_pattern( pattern )``:
+   Add the given path or path pattern to the set of patterns that prevent
+   binary dependency analysis from creating a symbolic link to the top-level
+   application directory. The same can be achieved by setting the
+   :ref:`bindepend_symlink_suppression hook global variable <bindepend symlink suppression>`.
 
 The ``hook()`` function can add, remove or change included files using the
 above methods of ``hook_api``.
@@ -662,7 +729,7 @@ The ``psim_api`` object also offers the following methods:
    path that the imported module would add dynamically to
    the path if the module was executed normally.
    ``directory`` is a string, a pathname to add to the
-   :attr:`__path__` attribute.
+   ``__path__`` attribute.
 
 
 .. include:: _common_definitions.txt

@@ -19,32 +19,10 @@ from PyInstaller.archive.writers import SplashWriter
 from PyInstaller.building import splash_templates
 from PyInstaller.building.datastruct import Target
 from PyInstaller.building.utils import _check_guts_eq, _check_guts_toc, misc
-from PyInstaller.compat import is_darwin, is_win, is_cygwin
-from PyInstaller.utils.hooks import tcl_tk as tcltk_utils
-
-try:
-    from PIL import Image as PILImage
-except ImportError:
-    PILImage = None
+from PyInstaller.compat import is_aix, is_darwin
+from PyInstaller.depend import bindepend
 
 logger = logging.getLogger(__name__)
-
-# These requirement files are checked against the current splash screen script. If you wish to modify the splash screen
-# and run into tcl errors/bad behavior, this is a good place to start and add components your implementation of the
-# splash screen might use.
-# NOTE: these paths use the *destination* layout for Tcl/Tk scripts, which uses unversioned tcl and tk directories
-# (see `PyInstaller.utils.hooks.tcl_tk.collect_tcl_tk_files`).
-splash_requirements = [
-    # prepended tcl/tk binaries
-    os.path.join(tcltk_utils.TK_ROOTNAME, "license.terms"),
-    os.path.join(tcltk_utils.TK_ROOTNAME, "text.tcl"),
-    os.path.join(tcltk_utils.TK_ROOTNAME, "tk.tcl"),
-    # Used for customizable font
-    os.path.join(tcltk_utils.TK_ROOTNAME, "ttk", "ttk.tcl"),
-    os.path.join(tcltk_utils.TK_ROOTNAME, "ttk", "fonts.tcl"),
-    os.path.join(tcltk_utils.TK_ROOTNAME, "ttk", "cursors.tcl"),
-    os.path.join(tcltk_utils.TK_ROOTNAME, "ttk", "utils.tcl"),
-]
 
 
 class Splash(Target):
@@ -105,10 +83,6 @@ class Splash(Target):
         :keyword minify_script:
             The splash screen is created by executing an Tcl/Tk script. This option enables minimizing the script,
             meaning removing all non essential parts from the script. Default: ``True``
-        :keyword rundir:
-            The folder name in which tcl/tk will be extracted at runtime. There should be no matching folder in your
-            application to avoid conflicts. Default:  ``'__splash'``
-        :type rundir: str
         :keyword name:
             An optional alternative filename for the .res file. If not specified, a name is generated.
         :type name: str
@@ -126,14 +100,40 @@ class Splash(Target):
             applications) can cover the splash screen by user bringing them to front. This might be useful for
             frozen applications with long startup times. Default: ``True``
         :type always_on_top: bool
+        :keyword center:
+            Splash screen centering mode: ``'default'``, ``'primary'``, ``'virtual'``, or ``'active'``. In the default
+            mode, the splash screen script computes the position using screen dimensions obtained via Tk's ``winfo``
+            command, which has platform-specific behavior in multi-monitor setups; on Windows, it seems to return the
+            size of the primary monitor, while on other platforms, it seems to return the size of the whole virtual
+            screen. In other modes, the bootloader attempts to query the target screen size (and position) using
+            platform-specific low-level API, and supply the information to splash screen script; in ``primary`` mode,
+            the size of primary screen is queried, and in ``virtual`` mode, the size of whole virtual screen is queried.
+            The ``active`` mode is supported only on Windows; the bootloader attempts to obtain position of mouse cursor
+            at the time when application is launched, and queries the size (and position) of the corresponding screen.
+            If the required information cannot be obtained and exposed by the bootloader, the splash screen script
+            falls back to the information provided by the ``winfo`` command. Default: ``'default'``
+        :type center: str
         """
-        from ..config import CONF
+        from PyInstaller.config import CONF
+        from PyInstaller.utils.hooks.tcl_tk import tcltk_info
+
         Target.__init__(self)
 
         # Splash screen is not supported on macOS. It operates in a secondary thread and macOS disallows UI operations
         # in any thread other than main.
         if is_darwin:
-            raise SystemExit("Splash screen is not supported on macOS.")
+            raise SystemExit("ERROR: Splash screen is not supported on macOS.")
+
+        # Ensure tkinter (and thus Tcl/Tk) is available.
+        if not tcltk_info.available:
+            raise SystemExit(
+                "ERROR: Your platform does not support the splash screen feature, since tkinter is not installed. "
+                "Please install tkinter and try again."
+            )
+
+        # Check if the Tcl/Tk version is supported.
+        logger.info("Verifying Tcl/Tk compatibility with splash screen requirements")
+        self._check_tcl_tk_compatibility(tcltk_info)
 
         # Make image path relative to .spec file
         if not os.path.isabs(image_file):
@@ -148,8 +148,12 @@ class Splash(Target):
         self.name = kwargs.get("name", None)
         self.script_name = kwargs.get("script_name", None)
         self.minify_script = kwargs.get("minify_script", True)
-        self.rundir = kwargs.get("rundir", None)
         self.max_img_size = kwargs.get("max_img_size", (760, 480))
+
+        self.center = kwargs.get("center", "default").lower()
+        if self.center not in self._CENTER_MODES:
+            valid_modes = list(self._CENTER_MODES.keys())
+            raise ValueError(f"Invalid center mode {self.center!r}! Must be one of: {valid_modes!r}")
 
         # text options
         self.text_pos = kwargs.get("text_pos", None)
@@ -168,75 +172,81 @@ class Splash(Target):
         if self.script_name is None:
             self.script_name = root + '_script.tcl'
 
-        if self.rundir is None:
-            self.rundir = self._find_rundir(binaries + datas)
-
         # Internal variables
-        try:
-            # Do not import _tkinter at the toplevel, because on some systems _tkinter will fail to load, since it is
-            # not installed. This would cause a runtime error in PyInstaller, since this module is imported from
-            # build_main.py, instead we just want to inform the user that the splash screen feature is not supported on
-            # his platform
-            import _tkinter
-            self._tkinter_module = _tkinter
-            self._tkinter_file = self._tkinter_module.__file__
-        except ModuleNotFoundError:
-            raise SystemExit(
-                "You platform does not support the splash screen feature, since tkinter is not installed. Please "
-                "install tkinter and try again."
-            )
+        # Store path to _tkinter extension module, so that guts check can detect if the path changed for some reason.
+        self._tkinter_file = tcltk_info.tkinter_extension_file
 
         # Calculated / analysed values
         self.uses_tkinter = self._uses_tkinter(self._tkinter_file, binaries)
         logger.debug("Program uses tkinter: %r", self.uses_tkinter)
         self.script = self.generate_script()
-        self.tcl_lib, self.tk_lib = tcltk_utils.find_tcl_tk_shared_libs(self._tkinter_file)
-        if is_darwin:
-            # Outdated Tcl/Tk 8.5 system framework is not supported. Depending on macOS version, the library path will
-            # come up empty (hidden system libraries on Big Sur), or will be
-            # [/System]/Library/Frameworks/Tcl.framework/Tcl
-            if self.tcl_lib[1] is None or 'Library/Frameworks/Tcl.framework' in self.tcl_lib[1]:
-                raise SystemExit("The splash screen feature does not support macOS system framework version of Tcl/Tk.")
-        # Check if tcl/tk was found
-        assert all(self.tcl_lib)
-        assert all(self.tk_lib)
-        logger.debug("Use Tcl Library from %s and Tk From %s", self.tcl_lib, self.tk_lib)
-        self.splash_requirements = set([self.tcl_lib[0], self.tk_lib[0]] + splash_requirements)
+        self.tcl_lib = tcltk_info.tcl_shared_library  # full path to shared library
+        self.tk_lib = tcltk_info.tk_shared_library
 
-        logger.info("Collect tcl/tk binaries for the splash screen")
-        tcltk_tree = tcltk_utils.collect_tcl_tk_files(self._tkinter_file)
-        if self.full_tk:
-            # The user wants a full copy of tk, so make all tk files a requirement.
-            self.splash_requirements.update(entry[0] for entry in tcltk_tree)
+        assert self.tcl_lib is not None
+        assert self.tk_lib is not None
 
-        self.binaries = []
-        if not self.uses_tkinter:
-            # The user's script does not use tkinter, so we need to provide a TOC of all necessary files add the shared
-            # libraries to the binaries.
-            self.binaries.append((self.tcl_lib[0], self.tcl_lib[1], 'BINARY'))
-            self.binaries.append((self.tk_lib[0], self.tk_lib[1], 'BINARY'))
+        logger.debug("Using Tcl shared library: %r", self.tcl_lib)
+        logger.debug("Using Tk shared library: %r", self.tk_lib)
 
-            # Only add the intersection of the required and the collected resources, or add all entries if full_tk is
-            # true.
+        self.splash_requirements = set([
+            # NOTE: the implicit assumption here is that Tcl and Tk shared library are collected into top-level
+            # application directory, which, at tme moment, is true in practically all cases.
+            os.path.basename(self.tcl_lib),
+            os.path.basename(self.tk_lib),
+        ])
+
+        # The list of requirements below is based on the current implementation of splash screen script. If you want
+        # to extend the splash screen functionality and run into Tcl/Tk errors, chances are that additional Tk
+        # components need to be added here.
+        tcltk_embedded_data = tcltk_info.tcl_data_dir.startswith('//zipfs:/')
+        if tcltk_embedded_data:
+            logger.info("Splash screen will use data files embedded in Tcl/Tk shared libraries")
+        else:
+            logger.info("Collecting Tcl/Tk data files for the splash screen")
+
+            self.splash_requirements.update([
+                # NOTE: these paths use the *destination* layout for Tcl/Tk scripts, which uses unversioned tcl and tk
+                # directories (see `PyInstaller.utils.hooks.tcl_tk.collect_tcl_tk_files`).
+                os.path.join(tcltk_info.TCL_ROOTNAME, "init.tcl"),
+                # Core Tk
+                os.path.join(tcltk_info.TK_ROOTNAME, "license.terms"),
+                os.path.join(tcltk_info.TK_ROOTNAME, "text.tcl"),
+                os.path.join(tcltk_info.TK_ROOTNAME, "tk.tcl"),
+                # Used for customizable font
+                os.path.join(tcltk_info.TK_ROOTNAME, "ttk", "ttk.tcl"),
+                os.path.join(tcltk_info.TK_ROOTNAME, "ttk", "fonts.tcl"),
+                os.path.join(tcltk_info.TK_ROOTNAME, "ttk", "cursors.tcl"),
+                os.path.join(tcltk_info.TK_ROOTNAME, "ttk", "utils.tcl"),
+            ])
+
+            if tcltk_info.tk_version >= (9, 0):
+                self.splash_requirements.update([
+                    os.path.join(tcltk_info.TK_ROOTNAME, "scaling.tcl"),
+                    os.path.join(tcltk_info.TK_ROOTNAME, "tclIndex"),  # required for auto-load of scaling.tcl
+                ])
+
+            tcltk_tree = tcltk_info.data_files  # 3-element tuple TOC
+            if self.full_tk:
+                # The user wants a full copy of Tk, so make all Tk files a requirement.
+                self.splash_requirements.update(entry[0] for entry in tcltk_tree)
+
+        # Scan for binary dependencies of the Tcl/Tk shared libraries, and add them to `binaries` TOC list (which
+        # should really be called `dependencies` as it is not limited to binaries. But it is too late now, and
+        # existing spec files depend on this naming). We specify these binary dependencies (which include the
+        # Tcl and Tk shared libraries themselves) even if the user's program uses tkinter and they would be collected
+        # anyway; let the collection mechanism deal with potential duplicates.
+        tcltk_libs = [(os.path.basename(src_name), src_name, 'BINARY') for src_name in (self.tcl_lib, self.tk_lib)]
+        self.binaries = bindepend.binary_dependency_analysis(tcltk_libs)
+
+        # Put all shared library dependencies in `splash_requirements`, so they are made available in onefile mode.
+        self.splash_requirements.update(entry[0] for entry in self.binaries)
+
+        # If the user's program does not use tkinter, add resources from Tcl/Tk tree to the dependencies list.
+        # Do so only for the resources that are part of splash requirements. Not applicable for cases where
+        # data is embedded in Tcl/Tk shared libraries.
+        if not self.uses_tkinter and not tcltk_embedded_data:
             self.binaries.extend(entry for entry in tcltk_tree if entry[0] in self.splash_requirements)
-
-        # Handle extra requirements of Tcl/Tk shared libraries (e.g., vcruntime140.dll on Windows - see issue #6284).
-        # These need to be added to splash requirements, so they are extracted into the initial runtime directory in
-        # order to make onefile builds work.
-        #
-        # The really proper way to implement this would be to perform full dependency analysis on self.tcl_lib[0] and
-        # self.tk_lib[0], and ensure that those dependencies are collected and added to splash requirements. This
-        # would, for example, ensure that on Linux, dependent X libraries are collected, just as if the frozen app
-        # itself was using tkinter. On the other hand, collecting all the extra shared libraries on Linux is currently
-        # futile anyway, because the bootloader's parent process would need to set LD_LIBRARY_PATH to the initial
-        # runtime directory to actually have them loaded (and that requires process to be restarted to take effect).
-        #
-        # So for now, we only deal with this on Windows, in a quick'n'dirty work-around way, by assuming that
-        # vcruntime140.dll is already collected as dependency of some other shared library (e.g., the python shared
-        # library).
-        if is_win or is_cygwin:
-            EXTRA_REQUIREMENTS = {'vcruntime140.dll'}
-            self.splash_requirements.update([name for name, *_ in binaries if name.lower() in EXTRA_REQUIREMENTS])
 
         # Check if all requirements were found.
         collected_files = set(entry[0] for entry in (binaries + datas + self.binaries))
@@ -244,7 +254,11 @@ class Splash(Target):
         def _filter_requirement(filename):
             if filename not in collected_files:
                 # Item is not bundled, so warn the user about it. This actually may happen on some tkinter installations
-                # that are missing the license.terms file.
+                # that are missing the license.terms file - as this file has no effect on operation of splash screen,
+                # suppress the warning for it.
+                if os.path.basename(filename) == 'license.terms':
+                    return False
+
                 logger.warning(
                     "The local Tcl/Tk installation is missing the file %s. The behavior of the splash screen is "
                     "therefore undefined and may be unsupported.", filename
@@ -255,12 +269,38 @@ class Splash(Target):
         # Remove all files which were not found.
         self.splash_requirements = set(filter(_filter_requirement, self.splash_requirements))
 
-        # Test if the tcl/tk version is supported by the bootloader.
-        self.test_tk_version()
+        logger.debug("Splash requirements: %s", self.splash_requirements)
 
-        logger.debug("Splash Requirements: %s", self.splash_requirements)
+        # On AIX, the Tcl and Tk shared libraries might in fact be ar archives with shared object inside it, and need to
+        # be `dlopen`'ed with full name (for example, `libtcl.a(libtcl.so.8.6)` and `libtk.a(libtk.so.8.6)`. So if the
+        # library's suffix is .a, adjust the name accordingly, assuming fixed format for the shared object name.
+        # Adjust the names at the end of this method, because preceding steps use `self.tcl_lib` and `self.tk_lib` for
+        # filesystem-based operations and need the original filenames.
+        if is_aix:
+            _, ext = os.path.splitext(self.tcl_lib)
+            if ext == '.a':
+                tcl_major, tcl_minor = tcltk_info.tcl_version
+                self.tcl_lib += f"(libtcl.so.{tcl_major}.{tcl_minor})"
+            _, ext = os.path.splitext(self.tk_lib)
+            if ext == '.a':
+                tk_major, tk_minor = tcltk_info.tk_version
+                self.tk_lib += f"(libtk.so.{tk_major}.{tk_minor})"
+
+        if tcltk_embedded_data:
+            self.tcl_data_dir = tcltk_info.tcl_data_dir
+            self.tk_data_dir = tcltk_info.tk_data_dir
+        else:
+            self.tcl_data_dir = tcltk_info.TCL_ROOTNAME
+            self.tk_data_dir = tcltk_info.TK_ROOTNAME
 
         self.__postinit__()
+
+    _CENTER_MODES = {
+        'default': SplashWriter._SPLASH_CENTER_DEFAULT,
+        'primary': SplashWriter._SPLASH_CENTER_PRIMARY_SCREEN,
+        'virtual': SplashWriter._SPLASH_CENTER_VIRTUAL_SCREEN,
+        'active': SplashWriter._SPLASH_CENTER_ACTIVE_SCREEN,
+    }
 
     _GUTS = (
         # input parameters
@@ -275,13 +315,15 @@ class Splash(Target):
         ('always_on_top', _check_guts_eq),
         ('full_tk', _check_guts_eq),
         ('minify_script', _check_guts_eq),
-        ('rundir', _check_guts_eq),
         ('max_img_size', _check_guts_eq),
+        ('center', _check_guts_eq),
         # calculated/analysed values
         ('uses_tkinter', _check_guts_eq),
         ('script', _check_guts_eq),
         ('tcl_lib', _check_guts_eq),
         ('tk_lib', _check_guts_eq),
+        ('tcl_data_dir', _check_guts_eq),
+        ('tk_data_dir', _check_guts_eq),
         ('splash_requirements', _check_guts_eq),
         ('binaries', _check_guts_toc),
         # internal value
@@ -303,6 +345,12 @@ class Splash(Target):
 
     def assemble(self):
         logger.info("Building Splash %s", self.name)
+
+        # Check if PIL/pillow is available.
+        try:
+            from PIL import Image as PILImage
+        except ImportError:
+            PILImage = None
 
         # Function to resize a given image to fit into the area defined by max_img_size.
         def _resize_image(_image, _orig_size):
@@ -333,14 +381,14 @@ class Splash(Target):
                 _img.close()
                 _img_resized.close()
                 _image_data = _image_stream.getvalue()
-                logger.info("Resized image %s from dimensions %s to (%d, %d)", self.image_file, str(_orig_size), _w, _h)
+                logger.info("Resized image %s from dimensions %r to (%d, %d)", self.image_file, _orig_size, _w, _h)
                 return _image_data
             else:
                 raise ValueError(
                     "The splash image dimensions (w: %d, h: %d) exceed max_img_size (w: %d, h:%d), but the image "
                     "cannot be resized due to missing PIL.Image! Either install the Pillow package, adjust the "
-                    "max_img_size, or use an image of compatible dimensions.", _orig_size[0], _orig_size[1],
-                    self.max_img_size[0], self.max_img_size[1]
+                    "max_img_size, or use an image of compatible dimensions." %
+                    (_orig_size[0], _orig_size[1], self.max_img_size[0], self.max_img_size[1])
                 )
 
         # Open image file
@@ -372,7 +420,7 @@ class Splash(Target):
         else:
             raise ValueError(
                 "The image %s needs to be converted to a PNG file, but PIL.Image is not available! Either install the "
-                "Pillow package, or use a PNG image for you splash screen.", self.image_file
+                "Pillow package, or use a PNG image for you splash screen." % (self.image_file,)
             )
 
         image_file.close()
@@ -380,40 +428,59 @@ class Splash(Target):
         SplashWriter(
             self.name,
             self.splash_requirements,
-            self.tcl_lib[0],  # tcl86t.dll
-            self.tk_lib[0],  # tk86t.dll
-            tcltk_utils.TK_ROOTNAME,
-            self.rundir,
+            os.path.basename(self.tcl_lib),  # tcl86t.dll
+            os.path.basename(self.tk_lib),  # tk86t.dll
+            self.tcl_data_dir,
+            self.tk_data_dir,
             image,
-            self.script
+            self.script,
+            self._CENTER_MODES[self.center],
         )
 
-    def test_tk_version(self):
-        tcl_version = float(self._tkinter_module.TCL_VERSION)
-        tk_version = float(self._tkinter_module.TK_VERSION)
+    @staticmethod
+    def _check_tcl_tk_compatibility(tcltk_info):
+        tcl_version = tcltk_info.tcl_version  # (major, minor) tuple
+        tk_version = tcltk_info.tk_version
+
+        if is_darwin and tcltk_info.is_macos_system_framework:
+            # Outdated Tcl/Tk 8.5 system framework is not supported.
+            raise SystemExit(
+                "ERROR: The splash screen feature does not support macOS system framework version of Tcl/Tk."
+            )
 
         # Test if tcl/tk version is supported
-        if tcl_version < 8.6 or tk_version < 8.6:
+        if tcl_version < (8, 6) or tk_version < (8, 6):
             logger.warning(
-                "The installed Tcl/Tk (%s/%s) version might not work with the splash screen feature of the bootloader. "
-                "The bootloader is tested against Tcl/Tk 8.6", self._tkinter_module.TCL_VERSION,
-                self._tkinter_module.TK_VERSION
+                "The installed Tcl/Tk (%d.%d / %d.%d) version might not work with the splash screen feature of the "
+                "bootloader, which was tested against Tcl/Tk 8.6", *tcl_version, *tk_version
             )
 
         # This should be impossible, since tcl/tk is released together with the same version number, but just in case
         if tcl_version != tk_version:
             logger.warning(
-                "The installed version of Tcl (%s) and Tk (%s) do not match. PyInstaller is tested against matching "
-                "versions", self._tkinter_module.TCL_VERSION, self._tkinter_module.TK_VERSION
+                "The installed version of Tcl (%d.%d) and Tk (%d.%d) do not match. PyInstaller is tested against "
+                "matching versions", *tcl_version, *tk_version
             )
 
         # Ensure that Tcl is built with multi-threading support.
-        if not tcltk_utils.tcl_threaded:
+        if not tcltk_info.tcl_threaded:
             # This is a feature breaking problem, so exit.
             raise SystemExit(
-                "The installed tcl version is not threaded. PyInstaller only supports the splash screen "
-                "using threaded tcl."
+                "ERROR: The installed Tcl version is not threaded. PyInstaller only supports the splash screen "
+                "using threaded Tcl."
             )
+
+        # Ensure that Tcl and Tk shared libraries are available
+        if tcltk_info.tcl_shared_library is None or tcltk_info.tk_shared_library is None:
+            message = \
+                "ERROR: Could not determine the path to Tcl and/or Tk shared library, " \
+                "which are required for splash screen."
+            if not tcltk_info.tkinter_extension_file:
+                message += (
+                    " The _tkinter module appears to be a built-in, which likely means that python was built with "
+                    "statically-linked Tcl/Tk libraries and is incompatible with splash screen."
+                )
+            raise SystemExit(message)
 
     def generate_script(self):
         """
@@ -445,36 +512,16 @@ class Splash(Target):
             script = re.sub(' +', ' ', script)
 
         # Write script to disk, so that it is transparent to the user what script is executed.
-        with open(self.script_name, "w") as script_file:
+        with open(self.script_name, "w", encoding="utf-8") as script_file:
             script_file.write(script)
         return script
 
     @staticmethod
     def _uses_tkinter(tkinter_file, binaries):
         # Test for _tkinter extension instead of tkinter module, because user might use a different wrapping library for
-        # Tk. Use `pathlib.PurePath˙ in comparisons to account for case normalization and separator normalization.
+        # Tk. Use `pathlib.PurePath` in comparisons to account for case normalization and separator normalization.
         tkinter_file = pathlib.PurePath(tkinter_file)
         for dest_name, src_name, typecode in binaries:
             if pathlib.PurePath(src_name) == tkinter_file:
                 return True
         return False
-
-    @staticmethod
-    def _find_rundir(structure):
-        # First try a name the user could understand, if one would find the directory.
-        rundir = '__splash%s'
-        candidate = rundir % ""
-        counter = 0
-
-        # Run this loop as long as a folder exist named like rundir. In most cases __splash will be sufficient and this
-        # loop won't enter.
-        while any(e[0].startswith(candidate + os.sep) for e in structure):
-            # just append to rundir a counter
-            candidate = rundir % str(counter)
-            counter += 1
-
-            # The SPLASH_DATA_HEADER structure limits the name to be 16 bytes at maximum. So if we exceed the limit
-            # raise an error. This will never happen, since there are 10^8 different possibilities, but just in case.
-            assert len(candidate) <= 16
-
-        return candidate

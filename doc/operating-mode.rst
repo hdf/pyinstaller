@@ -133,12 +133,6 @@ than the entire folder.
 or different dependencies, or if the dependencies
 are upgraded, you must redistribute the whole bundle.)
 
-A small disadvantage of the one-folder format is that the one folder contains
-a large number of files.
-Your user must find the :file:`myscript` executable
-in a long list of names or among a big array of icons.
-Also your user can create
-a problem by accidentally dragging files out of the folder.
 
 .. _how the one-folder program works:
 
@@ -161,8 +155,8 @@ to execute your script.
 Everything follows normally from there, provided
 that all the necessary support files were included.
 
-(This is an overview.
-For more detail, see :ref:`The Bootstrap Process in Detail` below.)
+This is an overview. For more details, see :ref:`The Bootstrap Process in Detail`.
+For details on restrictions due to built-in security validation, see :ref:`bootloader security validation onedir`.
 
 
 .. _Bundling to One File:
@@ -220,7 +214,9 @@ to mount the ``/tmp`` folder with a "no-execution" option.
 That option is not compatible with a PyInstaller
 one-file bundle. It needs to execute code out of :file:`/tmp`.
 If you know the target environment,
-:option:`--runtime-tmpdir` might be a workaround.)
+:option:`--runtime-tmpdir` might be a workaround. Alternatively,
+you can set the environment variable that controls the temporary
+directory before launching the program. See :ref:`defining the extraction location`).
 
 Because the program makes a temporary folder with a unique name,
 you can run multiple copies of the app;
@@ -253,12 +249,11 @@ stored in the executable, and the bootloader will create the
     escalate privileges by modifying them.
 
 .. Note::
-    Applications that use `os.setuid()` may encounter permissions errors.
-    The temporary folder where the bundled app runs may not being readable
-    after `setuid` is called. If your script needs to
-    call `setuid`, it may be better to use one-folder mode
-    so as to have more control over the permissions on its files.
+    Applications that use ``os.setuid()`` may encounter permissions errors.
+    The temporary folder where the bundled app runs will likely not be accessible
+    after ``os.setuid()`` is called.
 
+For details on restrictions due to built-in security validation, see :ref:`bootloader security validation onefile`.
 
 Using a Console Window
 ~~~~~~~~~~~~~~~~~~~~~~~

@@ -5,6 +5,246 @@ Thanks goes to all the kind PyInstaller contributors who have contributed
 new code, bug reports, fixes, comments and ideas. A brief list follows,
 please let us know if your name is omitted by accident:
 
+Contributions to PyInstaller 6.22.2
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 6.22.1
+-----------------------------------
+
+* Rok Mandeljc
+* Joe Rivera
+* Simão Afonso
+
+Contributions to PyInstaller 6.22.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Arkadiusz Miśkiewicz
+* Florine W. Dekker
+* Philipp Hörst
+
+Contributions to PyInstaller 6.21.0
+-----------------------------------
+
+* Rok Mandeljc
+* Arjan Molenaar
+* Brénainn Woodsend
+
+Contributions to PyInstaller 6.20.0
+-----------------------------------
+
+* Rok Mandeljc
+* Eric Werner
+* mcoms
+
+Contributions to PyInstaller 6.19.0
+-----------------------------------
+
+* Rok Mandeljc
+* Alain Kadar
+* Suren Karapetyan
+
+Contributions to PyInstaller 6.18.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* markmenge
+
+Contributions to PyInstaller 6.17.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Chris Bradel
+* Jacob Rogers
+* Marc-Pierre-Barbier
+* Nils Nieuwejaar
+* Thomas Waldmann
+
+Contributions to PyInstaller 6.16.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Ross Demuth
+
+Contributions to PyInstaller 6.15.0
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 6.14.2
+-----------------------------------
+
+* Rok Mandeljc
+* Jordan Stopford
+* sorenstoutner
+
+Contributions to PyInstaller 6.14.1
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 6.14.0
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 6.13.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Temerold
+
+Contributions to PyInstaller 6.12.0
+-----------------------------------
+
+* Rok Mandeljc
+* Martin Rys
+* Brénainn Woodsend
+* Marcel Stör
+* Shin TOITA
+* maddyaby
+
+Contributions to PyInstaller 6.11.1
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Soren Stoutner
+
+Contributions to PyInstaller 6.11.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Nehal J Wani
+
+Contributions to PyInstaller 6.10.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Tomáš Čech
+* Kevin Suo
+
+Contributions to PyInstaller 6.9.0
+----------------------------------
+
+* Rok Mandeljc
+* James Gerity
+* Gaëtan Blond
+* Hoai-Thu Vuong
+
+Contributions to PyInstaller 6.8.0
+----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* kcehvoin1
+
+Contributions to PyInstaller 6.7.0
+----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Dan Yeaw
+
+Contributions to PyInstaller 6.6.0
+----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Olliver Aikenhead
+* RoboSchmied
+
+Contributions to PyInstaller 6.5.0
+----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Amir Rossert
+* Geo5
+
+Contributions to PyInstaller 6.4.0
+----------------------------------
+
+* Rok Mandeljc
+* Dan Yeaw
+* Andrey Marakulin
+* mbushkov
+* xuanzhi33
+
+Contributions to PyInstaller 6.3.0
+----------------------------------
+
+* Rok Mandeljc
+* Dan Yeaw
+
+Contributions to PyInstaller 6.2.0
+----------------------------------
+
+* Rok Mandeljc
+* David Baumgold
+
+Contributions to PyInstaller 6.1.0
+----------------------------------
+
+* Rok Mandeljc
+* Sebastian Thomschke
+
+Contributions to PyInstaller 6.0.0
+----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Benedikt Würkner
+* Blank
+* Brandon
+* James Gerity
+* Lorenzo Villani
+* axoroll7
+* byehack
+* coolcatco888
+* gentlegiantJGC
+
+Contributions to PyInstaller 5.13.2
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 5.13.1
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* James Gerity
+* Lorenzo Villani
+* coolcatco888
+* gentlegiantJGC
+
+Contributions to PyInstaller 5.13.0
+-----------------------------------
+
+* Dan Yeaw
+* Rok Mandeljc
+* Brénainn Woodsend
+* Fabian Dröge
+* Levin Ma
+
+Contributions to PyInstaller 5.12.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Joshua Bronson
+* caption
+
 Contributions to PyInstaller 5.11.0
 -----------------------------------
 

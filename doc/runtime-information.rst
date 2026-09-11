@@ -16,7 +16,8 @@ check "are we bundled?"::
 
 When a bundled app starts up, the bootloader sets the ``sys.frozen``
 attribute and stores the absolute path to the bundle folder in
-``sys._MEIPASS``. For a one-folder bundle, this is the path to that folder. For
+``sys._MEIPASS``. For a one-folder bundle, this is the path to the
+``_internal`` folder within the bundle. For
 a one-file bundle, this is the path to the temporary folder created by the
 bootloader (see :ref:`How the One-File Program Works`).
 
@@ -40,7 +41,7 @@ from a bundled script, the PyInstaller bootloader will set the module's
 
 For example, if you import ``mypackage.mymodule`` from a bundled script, then
 the ``__file__`` attribute of that module will be ``sys._MEIPASS +
-'mypackage/mymodule.pyc'``.  So if you have a data file at
+'mypackage/mymodule.py'``.  So if you have a data file at
 ``mypackage/file.dat`` that you added to the bundle at ``mypackage/file.dat``,
 the following code will get its path (in both the non-bundled and the bundled
 case)::
@@ -92,7 +93,7 @@ Placing data files at expected locations inside the bundle
 
 To place the data-files where your code expects them to be (i.e., relative
 to the main script or bundle directory), you can use the **dest** parameter
-of the :option:`--add-data=source:dest <--add-data>` command-line switches.
+of the :option:`--add-data="source:dest" <--add-data>` command-line switches.
 Assuming you normally
 use the following code in a file named ``my_script.py`` to locate a file
 ``file.dat`` in the same folder::
@@ -106,20 +107,18 @@ Or the pathlib_ equivalent::
     path_to_dat = Path(__file__).resolve().with_name("file.dat")
 
 And ``my_script.py`` is **not** part of a package (not in a folder containing
-an ``__init_.py``), then ``__file__`` will be ``[app root]/my_script.pyc``
+an ``__init__.py``), then ``__file__`` will be ``[app root]/my_script.py``
 meaning that if you put ``file.dat`` in the root of your package, using::
 
-    PyInstaller --add-data=/path/to/file.dat:.
+    PyInstaller --add-data="/path/to/file.dat:."
 
 It will be found correctly at runtime without changing ``my_script.py``.
 
-.. note:: Windows users should use ``;`` instead of ``:`` in the above line.
-
 If ``__file__`` is checked from inside a package or library (say
 ``my_library.data``) then ``__file__`` will be
-``[app root]/my_library/data.pyc`` and :option:`--add-data` should mirror that::
+``[app root]/my_library/data.py`` and :option:`--add-data` should mirror that::
 
-    PyInstaller --add-data=/path/to/my_library/file.dat:./my_library
+    PyInstaller --add-data="/path/to/my_library/file.dat:./my_library"
 
 However, in this case it is much easier to switch to :ref:`the spec file
 <Using Spec Files>` and use the
@@ -186,6 +185,7 @@ symbolic link::
     print( 'os.getcwd is', os.getcwd() )
 
 
+.. _library path considerations:
 
 LD_LIBRARY_PATH / LIBPATH considerations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -218,6 +218,8 @@ with the system program.
         # Remove the env var as a last resort:
         env.pop(lp_key, None)
     p = Popen(system_cmd, ..., env=env)  # create the process
+
+See also: :ref:`launching external programs`
 
 
 .. include:: _common_definitions.txt

@@ -1,4 +1,4 @@
-# Setup an Alpine test environment with Python 3.9, PyInstaller and its test dependencies.
+# Setup an Alpine test environment with Python, PyInstaller and its test dependencies.
 #
 # To build, boot into and invoke pytest inside this image run:
 #
@@ -17,32 +17,37 @@
 # runtime and test dependencies - no C compiler or dev packages. Once other packages start shipping musl compatible
 # wheels, most or possibly all of the build half will be safely removable.
 
-FROM python:3.9-alpine AS wheel-factory
+FROM python:alpine AS wheel-factory
 
 # Install a C compiler.
 RUN apk add musl-dev gcc
 # With zlib headers to compiler the bootloader,
 RUN apk add zlib-dev
-# Development packages to build lxml from source,
-RUN apk add libxml2-dev libxslt-dev
 # Linux headers to build psutil from source.
 RUN apk add linux-headers
 
 # Build/download wheels for all test requirements.
 RUN mkdir -p /io/tests
 WORKDIR /io
+COPY tests/requirements-base.txt tests/
 COPY tests/requirements-tools.txt tests/
 RUN pip wheel -r tests/requirements-tools.txt -w wheels
 
+# Recent versions of python docker image do not provide setuptools and wheel with python (>= 3.12) by default.
+# See: https://github.com/docker-library/python/issues/952
+RUN pip install --upgrade hatchling
+
 # Build a wheel for PyInstaller. Do this last and use as few files as possible to maximize cache-ability.
 COPY COPYING.txt .
-COPY setup.* ./
+COPY README.rst .
+COPY hatch_build.py .
+COPY pyproject.toml .
 COPY bootloader bootloader
 COPY PyInstaller PyInstaller
-RUN python setup.py -qqq bdist_wheel -d wheels
+RUN pip wheel --no-build-isolation --no-dependencies --wheel-dir=wheels .
 
 
-FROM python:3.9-alpine
+FROM python:alpine
 
 CMD ash
 WORKDIR /io
@@ -56,7 +61,7 @@ RUN apk add libpng
 # And by PyInstaller itself.
 RUN apk add binutils
 
-COPY setup.cfg .
+COPY pyproject.toml pytest.ini .
 
 # Import and the precompiled wheels from the `build` image.
 COPY --from=wheel-factory /io/wheels /wheels

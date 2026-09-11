@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-#
 # PyInstaller documentation build configuration file, created by
 # sphinx-quickstart on Sun Mar 27 16:53:34 2016.
 #
@@ -67,11 +64,13 @@ for (contents, path) in [
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.intersphinx', 
+extensions = ['sphinx.ext.intersphinx',
               'sphinx.ext.autodoc',
               'sphinx.ext.napoleon',
               'sphinx_autodoc_typehints',
               'sphinxcontrib.towncrier',
+              'sphinx_copybutton',
+              'sphinx_inline_tabs',
               'sphinx_issues']
 
 issues_github_path = "pyinstaller/pyinstaller"
@@ -129,7 +128,7 @@ release = __version__
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -173,22 +172,13 @@ todo_include_todos = False
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 
-if not on_rtd:  # only import and set the theme if we're building docs locally
-    import sphinx_rtd_theme
+import sphinx_rtd_theme
+html_theme = 'sphinx_rtd_theme'
 
-    html_theme = 'sphinx_rtd_theme'
-    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
-    html_style = 'css/pyinstaller.css'
-else:
-    # RTD adds some defaults to conf.py which make it behave
-    # differently. So we need a different way to specify our css.
-    html_context = {
-        'css_files': [
-            'https://media.readthedocs.org/css/sphinx_rtd_theme.css',
-            'https://media.readthedocs.org/css/readthedocs-doc-embed.css',
-            '_static/css/pyinstaller.css',
-        ],
-    }
+
+def setup(app):
+    app.add_css_file('css/pyinstaller.css')
+
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -281,6 +271,13 @@ html_static_path = ['_static']
 
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'PyInstallerdoc'
+
+# Define the canonical URL if you are using a custom domain on Read the Docs
+html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
+
+# Tell Jinja2 templates the build is running on Read the Docs
+if os.environ.get("READTHEDOCS", "") == "True":
+    html_context = {"READTHEDOCS": True}
 
 # -- Options for LaTeX output ---------------------------------------------
 

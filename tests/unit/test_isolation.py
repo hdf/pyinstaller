@@ -11,10 +11,12 @@
 
 import os
 import logging
+import gc
 
 import pytest
 
 from PyInstaller import isolated
+from PyInstaller import compat
 from PyInstaller.utils.tests import requires
 
 
@@ -57,36 +59,34 @@ def test_multiple_calls():
         assert child.call(add_1, 3) == 4
 
 
-def use_builtins():
-    """
-    Test builtin functions, classes and constants are available.
-    """
-    assert sum([1, 2, 3]) == 6
-    list(range(10))
-    print("hello")
-    Ellipsis
-    ...
-    NotImplemented
-
-
-def use_imports():
-    """
-    Test that import-ing is possible.
-    """
-    import string
-    string.digits
-
-    import psutil
-    return psutil.boot_time()
-
-
 def test_builtins_access():
     """
     Ensure that generic builtins are accessible and that imports work.
     """
+    def _use_builtins():
+        """
+        Test builtin functions, classes and constants are available.
+        """
+        assert sum([1, 2, 3]) == 6
+        list(range(10))
+        print("hello")
+        Ellipsis
+        ...
+        NotImplemented
+
+    def _use_imports():
+        """
+        Test that import-ing is possible.
+        """
+        import string
+        string.digits
+
+        import json
+        return json.dumps({'a': 1, 'b': 2})
+
     with isolated.Python() as child:
-        child.call(use_builtins)
-        child.call(use_imports)
+        child.call(_use_builtins)
+        child.call(_use_imports)
 
 
 def test_context_wrapping():
@@ -168,6 +168,7 @@ def test_decorator():
 
 
 @requires("psutil")
+@pytest.mark.xfail(compat.is_netbsd, reason="more file descriptors used than expected.")
 def test_pipe_leakage():
     """
     There is a finite number of open pipes/file handles/file descriptors allowed per process. Ensure that all
@@ -178,33 +179,74 @@ def test_pipe_leakage():
     from psutil import Process
     parent = Process()
 
-    # Get this platform's *count open handles* method.
-    open_fds = parent.num_handles if os.name == "nt" else parent.num_fds
-    old = open_fds()
+    # On Windows, the very first `subprocess.Popen()` seems to open two additional handles, which seem to remain open
+    # for the duration of the python process. Therefore, if a subprocess is spawned before this test is ran (either as
+    # a part of a preceding test, as a part of test collection, or even as a side effect of some 3rd party package
+    # having been loaded), those two extra handles will already be part of the initially-opened handles. If not, they
+    # will show up during this test and skew the results. Therefore, run a dummy subprocess here to normalize the
+    # conditions, and ensure that the test can be ran on its own.
+    if compat.is_win:
+        import subprocess
+        import sys
+        proc = subprocess.Popen(
+            [sys.executable, '--version'],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        proc.wait()
+        del proc
 
-    # Creating an isolated.Python() does nothing.
-    child = isolated.Python()
-    assert open_fds() == old
+    try:
+        # Prevent handles from being non-deterministically closed by garbage collect.
+        gc.freeze()
 
-    # On POSIX systems, entering the context creates the child process and 4 handles for sending/receiving to/from it.
-    # After creating the child process, we close the descriptors that were passed to the child, so the expected total
-    # increase in the parent/main process is two file descriptors.
-    # On Windows, we monitor file handles; four are opened when both pipes are created. Additional two handles are
-    # opened when the sub-process is spawned. Then we close the two pipe end-points that were inherited by the child,
-    # which closes two handles. Finally, we open file descriptors on the remaining two pipe end-point handles, and
-    # perform os.fdopen() on those FDs to obtained buffered python "file" object. This adds two additional file
-    # handles, bringing us to the total of six.
-    EXPECTED_INCREASE_IN_FDS = (2 if os.name != "nt" else 6)
+        # Get this platform's *count open handles* method.
+        open_fds = parent.num_handles if compat.is_win else parent.num_fds
+        old = open_fds()
 
-    with child:
-        assert open_fds() == old + EXPECTED_INCREASE_IN_FDS
-    # Exiting must close them all immediately. No implicit closure by garbage collect.
-    assert open_fds() == old
+        # Creating an isolated.Python() does nothing.
+        child = isolated.Python()
+        assert open_fds() == old
 
-    # Do it again just to be sure that the context manager properly restarts.
-    with child:
-        assert open_fds() == old + EXPECTED_INCREASE_IN_FDS
-    assert open_fds() == old
+        # On POSIX systems, entering the context creates the child process and 4 handles for sending/receiving to/from
+        # it. After creating the child process, we close the descriptors that were passed to the child, so the expected
+        # total increase in the parent/main process is two file descriptors.
+        #
+        # On Windows, the overall setup is a bit more complicated. We create both pipes, spawn the child process, and
+        # close end-points (handles) of the pipes that were passed to the child. Then, we open file descriptors on top
+        # of the remaining two pipe handles, using `msvcrt.open_osfhandle`. These descriptors are then passed to
+        # `os.fdopen` to obtain buffered python `file` object.
+        #
+        # Instead of monitoring file descriptors, we monitor file handles.
+        #
+        # Under python 3.12 and earlier, four handles are opened when both pipes are created. Additional two handles are
+        # opened when the child process is spawned. Closing the two pipe end-points closes two handles. Opening file
+        # descriptors on top of pipe handles (`msvcrt.open_osfhandle`) does not open additional handles, but opening
+        # python file objects on top of those descriptors via `os.fdopen` does - one for each file object. This adds two
+        # additional file handles, bringing us to the total of six.
+        #
+        # With python 3.13, the behavior has changed. Creating both pipes still opens four handles. However, spawning
+        # the child process opens only one handle. Closing the two pipe end-points closes two handles. No additional
+        # handles are created when opening file descriptors on top of pipe handles (`msvcrt.open_osfhandle`), nor when
+        # opening python file objects on top of those (`os.fdopen`). So in this case, the total is three.
+        if compat.is_win:
+            EXPECTED_INCREASE_IN_FDS = 3 if compat.is_py313 else 6
+        else:
+            EXPECTED_INCREASE_IN_FDS = 2
+
+        with child:
+            assert open_fds() == old + EXPECTED_INCREASE_IN_FDS
+        # Exiting must close them all immediately. No implicit closure by garbage collect.
+        assert open_fds() == old
+
+        # Do it again just to be sure that the context manager properly restarts.
+        with child:
+            assert open_fds() == old + EXPECTED_INCREASE_IN_FDS
+        assert open_fds() == old
+
+    finally:
+        gc.unfreeze()
 
 
 def is_isolated():
@@ -299,3 +341,44 @@ def test_shutdown_timeout_dangling_threads(strict_mode, caplog):
 
         # The isolated function should finish and return its expected results, regardless of the shutdown timeout.
         assert actual == expected
+
+
+def test_subprocess_crash():
+    def crash(a):
+        import os
+        os.kill(os.getpid(), 9)
+
+    with pytest.raises(
+        isolated._parent.SubprocessDiedError, match=r"died calling crash\(\) with args=\(12,\) and kwargs=\{\}. .* -?9"
+    ):
+        isolated.call(crash, 12)
+
+
+# Nested isolated subprocesses are not supported; attempts to use PyInstaller.isolated from within an isolated
+# subprocess should end up reusing the already-existing isolated subprocess. This behavior allows various hook utility
+# functions to be transparently used in the same isolated subprocess instead of having them potentially spawn their
+# own subprocesses (each of those having to import package(s) again).
+def test_nested_isolation():
+    def isolated_function():
+        from PyInstaller import isolated
+        import os
+
+        # Get this process ID of this (isolated process)
+        pid = os.getpid()
+
+        @isolated.decorate
+        def isolated_subfunction():
+            import os
+            return os.getpid()
+
+        other_pid = isolated_subfunction()
+        return pid, other_pid
+
+    # Test the isolated.call invocation
+    pid, other_pid = isolated.call(isolated_function)
+    assert pid == other_pid, f"Did not reuse the same isolated process: {pid} vs. {other_pid}"
+
+    # Test the isolated.call invocation
+    with isolated.Python() as subprocess:
+        pid, other_pid = subprocess.call(isolated_function)
+    assert pid == other_pid, f"Did not reuse the same isolated process: {pid} vs. {other_pid}"

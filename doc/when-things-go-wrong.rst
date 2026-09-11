@@ -108,7 +108,7 @@ Build-Time Python Errors
 PyInstaller sometimes terminates by raising a Python exception.
 In most cases the reason is clear from the exception message,
 for example "Your system is not supported", or "Pyinstaller
-requires at least Python 3.7".
+requires at least Python 3.8".
 Others clearly indicate a bug that should be reported.
 
 One of these errors can be puzzling, however:
@@ -266,21 +266,21 @@ or by editing the spec file,
 or with a hook file (see :ref:`Understanding PyInstaller Hooks` below).
 
 
-Extending a Package's :attr:`__path__`
+Extending a Package's :attr:`~module.__path__`
 ----------------------------------------------
 
 Python allows a script to extend the search path used for imports
-through the :attr:`__path__` mechanism.
-Normally, the :attr:`__path__` of an imported module has only one entry,
+through the :attr:`~module.__path__` mechanism.
+Normally, the :attr:`~module.__path__` of an imported module has only one entry,
 the directory in which the ``__init__.py`` was found.
-But ``__init__.py`` is free to extend its :attr:`__path__` to include other directories.
+But ``__init__.py`` is free to extend its :attr:`module.__path__` to include other directories.
 For example, the ``win32com.shell.shell`` module actually resolves to
 ``win32com/win32comext/shell/shell.pyd``.
-This is because ``win32com/__init__.py`` appends ``../win32comext`` to its :attr:`__path__`.
+This is because ``win32com/__init__.py`` appends ``../win32comext`` to its :attr:`module.__path__`.
 
 Because the ``__init__.py`` of an imported module
 is not actually executed during analysis,
-changes it makes to :attr:`__path__` are not seen by PyInstaller.
+changes it makes to :attr:`module.__path__` are not seen by PyInstaller.
 We fix the problem with the same hook mechanism we use for hidden imports,
 with some additional logic; see :ref:`Understanding PyInstaller Hooks` below.
 

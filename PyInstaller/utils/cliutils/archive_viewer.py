@@ -19,6 +19,13 @@ import sys
 import PyInstaller.log
 from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 
+try:
+    from argcomplete import autocomplete
+except ImportError:
+
+    def autocomplete(parser):
+        return None
+
 
 class ArchiveViewer:
     def __init__(self, filename, interactive_mode, recursive_mode, brief_mode):
@@ -167,10 +174,13 @@ class ArchiveViewer:
                 data = archive.extract(name)
             elif isinstance(archive, ZlibArchiveReader):
                 data = archive.extract(name, raw=True)
+                if data is None:
+                    raise ValueError("Entry has no associated data!")
             else:
                 raise NotImplementedError(f"Extraction from archive type {type(archive)} not implemented!")
         except Exception as e:
             print(f"Failed to extract data for entry {name!r} from {archive_name!r}: {e}", file=sys.stderr)
+            return
 
         # Write to file
         filename = input('Output filename? ')
@@ -182,6 +192,10 @@ class ArchiveViewer:
 
     def _show_archive_contents(self, archive_name, archive):
         if isinstance(archive, CArchiveReader):
+            if archive.options:
+                print(f"Options in {archive_name!r} (PKG/CArchive):")
+                for option in archive.options:
+                    print(f" {option}")
             print(f"Contents of {archive_name!r} (PKG/CArchive):")
             if self.brief_mode:
                 for name in archive.toc.keys():
@@ -196,9 +210,9 @@ class ArchiveViewer:
                 for name in archive.toc.keys():
                     print(f" {name}")
             else:
-                print(" is_package, position, length, name")
-                for name, (is_package, position, length) in archive.toc.items():
-                    print(f" {is_package}, {position}, {length}, {name!r}")
+                print(" typecode, position, length, name")
+                for name, (typecode, position, length) in archive.toc.items():
+                    print(f" {typecode}, {position}, {length}, {name!r}")
         else:
             print(f"Contents of {name} (unknown)")
             print(f"FIXME: implement content listing for archive type {type(archive)}!")
@@ -237,6 +251,7 @@ def run():
         help="PyInstaller archive to process.",
     )
 
+    autocomplete(parser)
     args = parser.parse_args()
     PyInstaller.log.__process_options(parser, args)
 

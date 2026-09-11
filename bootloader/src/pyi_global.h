@@ -18,221 +18,180 @@
 #ifndef PYI_GLOBAL_H
 #define PYI_GLOBAL_H
 
-/*
- * Detect memory leaks.
- *
- * Use Boehm garbage collector to detect memory leaks.
- * malloc(), free(), strdup() and similar functions
- * are replaced by calls from the gc library.
- */
-#ifdef PYI_LEAK_DETECTOR
-    #include <gc/leak_detector.h>
-#endif
-
-/*
- * Definition of type boolean. On OSX boolean type is available
- * in header <stdbool.h>.
- */
-#ifdef __APPLE__
-    #include <stdbool.h>  /* bool, true, false */
-#else
-/*
- * It looks like more recent versions of MSVC complains about 'typedef int bool'.
- * They probably have the type 'bool' defined.
- * TODO find out more info.
- */
-    #undef bool
-    #undef true
-    #undef false
-typedef int bool;
-    #define true    1
-    #define false   0
-#endif
-
-/* Type for dynamic library. */
 #ifdef _WIN32
-    #include <windows.h>  /* HINSTANCE */
-    #define dylib_t   HINSTANCE
+    #include <windows.h>
+#endif
+
+/* In the unlikely event that stdbool.h is not available, use our own
+ * definitions of bool, true, and false. */
+#ifdef HAVE_STDBOOL_H
+    #include <stdbool.h>
 #else
-    #define dylib_t   void *
+    #define bool int
+    #define true 1
+    #define false 0
 #endif
 
-/* Wrap some windows specific declarations for Unix. */
-#ifndef _WIN32
-    #define HMODULE void *
-#endif
 
-/*
- * On Windows PATH_MAX does not exist but MAX_PATH does.
- * WinAPI MAX_PATH limit is only 256. MSVCR functions does not have this limit.
- * Redefine PATH_MAX for Windows to support longer path names.
- */
-/* TODO use MSVCR function for file path handling. */
+/* Maximum buffer size for statically allocated path-related buffers in
+ * PyInstaller code. */
 #ifdef _WIN32
-    #ifdef PATH_MAX
-        #undef PATH_MAX  /* On Windows override PATH_MAX if defined. */
-    #endif
-    #define PATH_MAX 4096  /* Default value on Linux. */
+    /* Match the default value of PATH_MAX used on Linux. */
+    #define PYI_PATH_MAX 4096
 #elif __APPLE__
+    /* Recommended value for macOS. */
+    #define PYI_PATH_MAX 1024
+#else
+    /* Use PATH_MAX as defined in limits.h */
     #include <limits.h>
-    #define PATH_MAX 1024  /* Recommended value for OSX. */
-#else
-    #include <limits.h>  /* PATH_MAX */
+    #define PYI_PATH_MAX PATH_MAX
 #endif
 
-/*
- * These macros used to define variables to hold dynamically accessed entry
- * points. These are declared 'extern' in the header, and defined fully later.
+
+/* These macros are used to define prototypes for imported functions,
+ * to define corresponding entries in the function-table structures,
+ * and to populate those entries:
+ *  - PYI_EXT_FUNC_PROTO: given function's return type, name, and arguments,
+ *    creates a typedef prototype called _PYI_{name}_TYPE.
+ *  - PYI_EXT_FUNC_ENTRY: given function's name, generates the entry
+ *    for function-table structure, under assumption that prototype has
+ *    already been defined using via PYI_EXT_FUNC_PROTO.
+ *  - PYI_EXT_FUNC_BIND: given handle to loaded shared library, name
+ *    of the symbol to bind, and pointer to destination location, attempts
+ *    to bind the function (using GetProcAddress on Windows, dlsym on
+ *    other platforms).. The destination location is typically a field in
+ *    function-table structure, defined via PYI_EXT_FUNC_ENTRY.
+ *  - PYI_EXT_FUNC_BIND_EX: same as above, but with additional argument
+ *    that specifies the type name that was used with PYI_EXT_FUNC_ENTRY.
  */
 #ifdef _WIN32
+    typedef HMODULE pyi_dylib_t;
 
-    #define EXTDECLPROC(result, name, args) \
-    typedef result (__cdecl *__PROC__ ## name) args; \
-    extern __PROC__ ## name PI_ ## name;
+    #define PYI_EXT_FUNC_PROTO(result, name, args) \
+        typedef result (__cdecl *_PYI_ ## name ## _TYPE) args;
 
-    #define EXTDECLVAR(vartyp, name) \
-    typedef vartyp __VAR__ ## name; \
-    extern __VAR__ ## name *PI_ ## name;
+    #define PYI_EXT_FUNC_ENTRY(name) \
+        _PYI_ ## name ##_TYPE name;
 
-#else
+    /* GetProcAddress() returns FARPROC, a function pointer, which can
+     * be cast to a different function pointer. */
+    #define PYI_EXT_FUNC_BIND_EX(handle, type, name, dest) \
+        dest = (_PYI_ ## type ## _TYPE)GetProcAddress(handle, #name);
 
-    #define EXTDECLPROC(result, name, args) \
-    typedef result (*__PROC__ ## name) args; \
-    extern __PROC__ ## name PI_ ## name;
+#else /* ifdef _WIN32 */
+    #include <dlfcn.h> /* dlsym(), dlerror() */
 
-    #define EXTDECLVAR(vartyp, name) \
-    typedef vartyp __VAR__ ## name; \
-    extern __VAR__ ## name *PI_ ## name;
+    typedef void * pyi_dylib_t;
 
-#endif  /* WIN32 */
+    #define PYI_EXT_FUNC_PROTO(result, name, args) \
+        typedef result (*_PYI_ ## name ## _TYPE) args;
 
-/* Macros to declare and get foreign entry points in the C file.
- * Typedefs '__PROC__...' have been done above
+    #define PYI_EXT_FUNC_ENTRY(name) \
+        _PYI_ ## name ##_TYPE name;
+
+    /* dlsym() returns a void * pointer, which is an object pointer.
+     * ISO C explicitly forbids casts from object to function pointers
+     * (in theory, the two could have different storage type, although
+     * in practice, the cast should be safe on contemporary platforms).
+     * To avoid warnings when using gcc with -pedantic option turned on,
+     * we perform type-punning through union. */
+    #define PYI_EXT_FUNC_BIND_EX(handle, type, name, dest) \
+        do {\
+            /* This union requires its own scope */ \
+            union { \
+                _PYI_ ## type ## _TYPE func_ptr; \
+                void *obj_ptr; \
+            } alias; \
+            /* Store object pointer */ \
+            alias.obj_ptr = dlsym(handle, #name); \
+            /* Read function pointer */ \
+            dest = alias.func_ptr; \
+        } while(0)
+
+#endif  /* ifdef _WIN32 */
+
+/* This simplified macro assumes that the type name passed to the
+ * PYI_EXT_FUNC_ENTRY matches the symbol name. */
+#define PYI_EXT_FUNC_BIND(handle, name, dest) PYI_EXT_FUNC_BIND_EX(handle, name, name, dest)
+
+
+/*
+ * Debug and error macros:
+ *  - PYI_DEBUG
+ *  - PYI_WARNING
+ *  - PYI_ERROR
+ *  - PYI_PERROR
  *
- * GETPROC_RENAMED is to support APIs functions that are simply renamed. We use
- * the new name, and when loading an old Python lib, load the old symbol into the
- * new name.
+ * On Windows, additional macros are available for native wide-char
+ * strings:
+ *  - PYI_DEBUG_W
+ *  - PYI_WARNING_W
+ *  - PYI_ERROR_W
+ *  - PYI_PERROR_W
+ *  - PYI_WINERROR_W
  */
-#ifdef _WIN32
 
-    #define DECLPROC(name) \
-    __PROC__ ## name PI_ ## name = NULL;
-    #define GETPROCOPT(dll, name, sym) \
-    PI_ ## name = (__PROC__ ## name)GetProcAddress (dll, #sym)
-    #define GETPROC(dll, name) \
-    GETPROCOPT(dll, name, name); \
-    if (!PI_ ## name) { \
-        FATAL_WINERROR("GetProcAddress", "Failed to get address for " #name "\n"); \
-        return -1; \
-    }
-    #define GETPROC_RENAMED(dll, name, sym) \
-    GETPROCOPT(dll, name, sym); \
-    if (!PI_ ## name) { \
-        FATAL_WINERROR("GetProcAddress", "Failed to get address for " #sym "\n"); \
-        return -1; \
-    }
-    #define DECLVAR(name) \
-    __VAR__ ## name * PI_ ## name = NULL;
-    #define GETVAR(dll, name) \
-    PI_ ## name = (__VAR__ ## name *)GetProcAddress (dll, #name); \
-    if (!PI_ ## name) { \
-        FATAL_WINERROR("GetProcAddress", "Failed to get address for " #name "\n"); \
-        return -1; \
-    }
+#include <errno.h>  /* errno */
 
-#else  /* ifdef _WIN32 */
+#if defined(_WIN32)
+    /* On Windows, we have separate implementations of these functions
+     * for console and for windowed/noconsole mode. */
+    void pyi_error_message(const char *fmt, ...);
+    void pyi_warning_message(const char *fmt, ...);
+    void pyi_perror_message(const char *funcname, int error_code, const char *fmt, ...);
 
-    #define DECLPROC(name) \
-    __PROC__ ## name PI_ ## name = NULL;
-    #define GETPROCOPT(dll, name, sym) \
-    PI_ ## name = (__PROC__ ## name)dlsym (dll, #sym)
-    #define GETPROC(dll, name) \
-    GETPROCOPT(dll, name, name); \
-    if (!PI_ ## name) { \
-        FATALERROR ("Cannot dlsym for " #name "\n"); \
-        return -1; \
-    }
-    #define GETPROC_RENAMED(dll, name, sym) \
-    GETPROCOPT(dll, name, sym); \
-    if (!PI_ ## name) { \
-        FATALERROR ("Cannot dlsym for " #sym "\n"); \
-        return -1; \
-    }
-    #define DECLVAR(name) \
-    __VAR__ ## name * PI_ ## name = NULL;
-    #define GETVAR(dll, name) \
-    PI_ ## name = (__VAR__ ## name *)dlsym(dll, #name); \
-    if (!PI_ ## name) { \
-        FATALERROR ("Cannot dlsym for " #name "\n"); \
-        return -1; \
-    }
+    void pyi_error_message_w(const wchar_t *fmt, ...);
+    void pyi_warning_message_w(const wchar_t *fmt, ...);
+    void pyi_perror_message_w(const wchar_t *funcname, int error_code, const wchar_t *fmt, ...);
+    void pyi_winerror_message_w(const wchar_t *funcname, DWORD error_code, const wchar_t *fmt, ...);
 
-#endif  /* WIN32 */
+    #define PYI_ERROR(...) pyi_error_message(__VA_ARGS__)
+    #define PYI_WARNING(...) pyi_warning_message(__VA_ARGS__)
+    #define PYI_PERROR(funcname, ...) pyi_perror_message(funcname, errno, __VA_ARGS__)
+
+    #define PYI_ERROR_W(...) pyi_error_message_w(__VA_ARGS__)
+    #define PYI_WARNING_W(...) pyi_warning_message_w(__VA_ARGS__)
+    #define PYI_PERROR_W(funcname, ...) pyi_perror_message_w(funcname, errno, __VA_ARGS__)
+    #define PYI_WINERROR_W(funcname, ...) pyi_winerror_message_w(funcname, GetLastError(), __VA_ARGS__)
+
+    #if defined(LAUNCH_DEBUG)
+        void pyi_debug_message(const char *fmt, ...);
+        void pyi_debug_message_w(const wchar_t *fmt, ...);
+
+        #define PYI_DEBUG(...) pyi_debug_message(__VA_ARGS__)
+        #define PYI_DEBUG_W(...) pyi_debug_message_w(__VA_ARGS__)
+    #else
+        #define PYI_DEBUG(...)
+        #define PYI_DEBUG_W(...)
+    #endif /* defined(LAUNCH_DEBUG) */
+#else /* defined(_WIN32) */
+    /* POSIX; display error messages to stderr. */
+    void pyi_error_message(const char *fmt, ...);
+    void pyi_warning_message(const char *fmt, ...);
+    void pyi_perror_message(const char *funcname, int error_code, const char *fmt, ...);
+
+    #define PYI_ERROR(...) pyi_error_message(__VA_ARGS__)
+    #define PYI_WARNING(...) pyi_warning_message(__VA_ARGS__)
+    #define PYI_PERROR(funcname, ...) pyi_perror_message(funcname, errno, __VA_ARGS__)
+
+    #if defined(LAUNCH_DEBUG)
+        void pyi_debug_message(const char *fmt, ...);
+        #define PYI_DEBUG(...) pyi_debug_message(__VA_ARGS__)
+    #else
+        #define PYI_DEBUG(...)
+    #endif
+#endif /* defined(_WIN32) */
+
 
 /*
- * Debug and error macros.
+ * Path and string macros.
  */
-
-void pyi_global_printf(const char *fmt, ...);
-void pyi_global_perror(const char *funcname, const char *fmt, ...);
-#ifdef _WIN32
-    void pyi_global_winerror(const char *funcname, const char *fmt, ...);
-#endif
-/*
- * On Windows and with windowed mode (no console) show error messages
- * in message boxes. In windowed mode nothing is written to console.
- */
-
-#if defined(_WIN32) && defined(WINDOWED)
-void mbfatalerror(const char *fmt, ...);
-    #define FATALERROR mbfatalerror
-
-void mbothererror(const char *fmt, ...);
-    #define OTHERERROR mbothererror
-
-    void mbfatal_perror(const char *funcname, const char *fmt, ...);
-    #define FATAL_PERROR mbfatal_perror
-
-    void mbfatal_winerror(const char *funcname, const char *fmt, ...);
-    #define FATAL_WINERROR mbfatal_winerror
-
-#else
-/* TODO copy over stbprint to bootloader. */
-    #define FATALERROR pyi_global_printf
-    #define OTHERERROR pyi_global_printf
-    #define FATAL_PERROR pyi_global_perror
-    #define FATAL_WINERROR pyi_global_winerror
-#endif  /* WIN32 and WINDOWED */
-
-/* Enable or disable debug output. */
-
-#ifdef LAUNCH_DEBUG
-    #if defined(_WIN32) && defined(WINDOWED)
-        /* Don't have console, resort to debugger output */
-        #define VS mbvs
-void mbvs(const char *fmt, ...);
-    #else
-        /* Have console, printf works */
-        #define VS pyi_global_printf
-    #endif
-#else
-    #if defined(_WIN32) && defined(_MSC_VER)
-        #define VS
-    #else
-        #define VS(...)
-    #endif
-#endif
-
-/* Path and string macros. */
-
 #ifdef _WIN32
     #define PYI_PATHSEP    ';'
     #define PYI_CURDIR     '.'
     #define PYI_SEP        '\\'
-/*
- * For some functions like strcat() we need to pass
- * string and not only char.
- */
+    /* For some functions like strcat() we need to pass
+     * string and not only char. */
     #define PYI_SEPSTR     "\\"
     #define PYI_PATHSEPSTR ";"
     #define PYI_CURDIRSTR  "."
@@ -245,9 +204,6 @@ void mbvs(const char *fmt, ...);
     #define PYI_CURDIRSTR  "."
 #endif
 
-/* Strings are usually terminated by this character. */
-#define PYI_NULLCHAR       '\0'
-
 /* File seek and tell with large (64-bit) offsets */
 #if defined(_WIN32) && defined(_MSC_VER)
     #define pyi_fseek _fseeki64
@@ -255,6 +211,12 @@ void mbvs(const char *fmt, ...);
 #else
     #define pyi_fseek fseeko
     #define pyi_ftell ftello
+#endif
+
+/* MSVC provides _stricmp() in-lieu of POSIX strcasecmp() */
+#if defined(_WIN32) && defined(_MSC_VER)
+    #define strcasecmp(string1, string2) _stricmp(string1, string2)
+    #define strncasecmp(string1, string2, count) _strnicmp(string1, string2, count)
 #endif
 
 /* Byte-order conversion macros */
@@ -286,7 +248,4 @@ void mbvs(const char *fmt, ...);
     #define pyi_be32toh(x) ntohl(x)
 #endif /* ifdef _WIN32 */
 
-/* Saved LC_CTYPE locale */
-extern char *saved_locale;
-
-#endif  /* PYI_GLOBAL_H */
+#endif /* PYI_GLOBAL_H */

@@ -88,9 +88,9 @@ Or in Windows, use the little-known BAT file line continuation::
 
     pyinstaller --noconfirm --log-level=WARN ^
         --onefile --nowindow ^
-        --add-data="README;." ^
-        --add-data="image1.png;img" ^
-        --add-binary="libfoo.so;lib" ^
+        --add-data="README:." ^
+        --add-data="image1.png:img" ^
+        --add-binary="libfoo.so:lib" ^
         --hidden-import=secret1 ^
         --hidden-import=secret2 ^
         --icon=..\MLNMFLCN.ICO ^
@@ -207,7 +207,7 @@ Splash Screen *(Experimental)*
     the Tcl/Tk (or rather, the underlying GUI toolkit) on macOS.
 
 Some applications may require a splash screen as soon as the application
-(bootloader) has been started, because especially in onefile mode large
+(bootloader) has been started, because especially in ``onefile`` mode large
 applications may have long extraction/startup times, while the bootloader
 prepares everything, where the user cannot judge whether the application
 was started successfully or not.
@@ -216,6 +216,29 @@ The bootloader is able to display a one-image (i.e. only an image) splash
 screen, which is displayed before the actual main extraction process starts.
 The splash screen supports non-transparent and hard-cut-transparent images as background
 image, so non-rectangular splash screens can also be displayed.
+
+.. Note::
+    Splash images with transparent regions are not supported on Linux due to
+    Tcl/Tk platform limitations. The ``-transparentcolor`` and ``-transparent`` wm attributes
+    used by PyInstaller are not available to Linux.
+
+.. Note::
+    On Windows, the transparency in splash screen is implemented by marking the
+    ``magenta`` color (``#ff00ff``) as transparent color, and overlaying the
+    splash screen image over magenta background. This has two implications.
+
+    First, any region of splash screen image that uses magenta color will be rendered as
+    transparent; if splash screen originally contains magenta regions, they should
+    be changed to a slightly different color instead (for example, ``#ff00fe``).
+
+    Second, **semi-transparent pixels in the splash screen image are not supported, and
+    will be rendered as a shade of magenta color that depends on transparency of
+    each pixel**, due to image being overlaid on magenta background. For example, if
+    splash screen image contains **feathered edges** (i.e., smooth edges made up of
+    semi-transparent pixels), these will end up manifesting as magenta-colored glow around
+    the opaque part of the splash screen - see :issue:`8579`. To mitigate this problem,
+    use an image processing utility to convert your image into a hard-cut transparent
+    image, where every pixel is either fully transparent or fully opaque.
 
 This splash screen is based on `Tcl/Tk`_, which is the same library used by the Python
 module `tkinter`_. PyInstaller bundles the dynamic libraries of tcl and tk into the
@@ -237,9 +260,53 @@ system, as it is not bundled. If the font is not available, a fallback font is u
 If the splash screen is configured to show text, it will automatically (as onefile archive)
 display the name of the file that is currently being unpacked, this acts as a progress bar.
 
+.. Warning::
+    While splash screen can be enabled in either ``onefile`` or ``onedir`` mode,
+    using it in ``onedir`` mode may cause issues with your application's own UI -
+    see :ref:`splash screen onedir issues`.
+
+
+.. _splash screen centering:
+
+Splash screen centering
+-----------------------
+
+By default, the splash screen script attempts to center the splash screen based on screen
+dimensions obtained by the Tk's ``winfo`` command (i.e., ``winfo screenwidth`` and
+``winfo screenheight``). In the case of multi-monitor setups, this may result in a platform-specific
+behavior; on Windows, the size of the primary screen seems to be reported, while on other platforms,
+the size of the whole virtual screen seems to be reported.
+
+Therefore, the splash screen implementation provides additional centering modes, where the target
+screen dimensions are obtained by bootloader using low-level platform-specific API, and passed to
+the splash screen script for centering purposes. The preferred splash screen centering mode can
+be set at build-time via the ``center`` argument passed to :ref:`the Splash target in the spec file
+<splash screen target>`, or via the :option:`--splash-center` command-line option when generating
+the spec file. The centering mode can be overridden at run-time using the :envvar:`PYINSTALLER_SPLASH_SCREEN_CENTER`
+environment variable.
+
+The following modes can be set at either build-time and the run-time:
+
+- **default**: have the splash screen script use Tk's ``winfo`` to obtain platform-specific screen
+  dimensions. No additional information is required from the bootloader.
+
+- **primary**: have the bootloader use low-level API to obtain dimensions of the primary screen,
+  so that splash screen is centered on the primary monitor.
+
+- **virtual**: have the bootloader use low-level API to obtain dimensions of the whole virtual
+  screen, so that splash screen is centered on the virtual screen.
+
+- **active**: have the bootloader use low-level API to obtain mouse cursor position, and obtain the
+  dimensions of corresponding screen. This way, the splash screen is centered on "active" monitor,
+  i.e., the one where the mouse cursor is located at the time when application is started. This mode
+  is currently supported only on Windows - on other platforms, **primary** mode is used instead.
+
+If the bootloader cannot obtain the required information, the splash screen script falls back to
+using the information obtained via the ``winfo`` command.
+
 
 The ``pyi_splash`` Module
-~~~~~~~~~~~~~~~~~~~~~~~~~
+-------------------------
 
 The splash screen is controlled from within Python by the :mod:`pyi_splash` module, which can
 be imported at runtime. This module **cannot** be installed by a package manager
@@ -262,17 +329,107 @@ used externally as a normal Python script, without a bootloader.
 For a detailed description see :ref:`pyi_splash Module`.
 
 
+.. _splash screen onedir issues:
+
+Issues caused by splash screen in ``onedir`` applications
+---------------------------------------------------------
+
+Splash screen was primarily designed for ``onefile`` mode, to indicate
+the application activity and progress during extraction to the temporary
+directory. In this mode, the splash screen and your application's own UI
+(if any) run in different processes; the splash screen runs in the parent
+process of the onefile application, while the application's UI runs in
+the child process of the onefile application (which is the main application
+process).
+
+While splash screen can be also used with ``onedir`` applications, be aware
+that in this mode, both the splash screen and the application's own UI run
+in the same process. This might have implications for the application's own
+windows, which are instantiated and shown after the splash screen's window,
+and might manifest in subtle issues, independently of whether your application
+also uses ``tkinter`` or some other UI framework.
+
+So far, the following issues have been observed:
+
+- :issue:`8338` (Windows): using splash screen in ``onedir`` application causes
+  focus issues in windows and dialogs shown by the application; closing the splash
+  screen might send other application windows to the background.
+- :issue:`9394` (Windows): using splash screen in ``onedir`` application that
+  uses ``tkinter`` prevents the default/application-wide window icon from
+  being set via ``Tk.iconphoto()``.
+
+These issues likely stem from the fact that splash screen is the first
+displayed window in the process, and therefore the OS ends up treating it
+as the "main" application window. A proper fix would likely require the
+redesign of splash screen to run in a separate process rather than in
+a secondary thread of the main process.
+
+
 .. _defining the extraction location:
 
 Defining the Extraction Location
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In rare cases, when you bundle to a single executable
-(see :ref:`Bundling to One File` and :ref:`how the one-file program works`),
-you may want to control the location of the temporary directory at compile
-time. This can be done using the :option:`--runtime-tmpdir` option. If this option is
-given, the bootloader will ignore any temp-folder location defined by the
-run-time OS. Please use this option only if you know what you are doing.
+When building your application in ``onefile`` mode (see :ref:`Bundling to
+One File` and :ref:`how the one-file program works`), you might encounter
+situations where you want to control the location of the temporary directory
+where the application unpacks itself. For example:
+
+- your application is supposed to be running for long periods of time,
+  and you need to prevent its files from being deleted by the OS that
+  performs periodic clean-up in standard temporary directories.
+
+- your target POSIX system does not use standard temporary directory
+  location (i.e., ``/tmp``) and the standard environment variables for
+  temporary directory are not set in the environment.
+
+- the default temporary directory on the target POSIX system is mounted
+  with ``noexec`` option, which prevents the frozen application from
+  loading the unpacked shared libraries.
+
+The location of the temporary directory can be overridden dynamically,
+by setting corresponding environment variable(s) before launching the
+application, or set statically, using the :option:`--runtime-tmpdir` option
+during the build process.
+
+Using environment variables
+---------------------------
+
+The extraction location can be controlled dynamically, by setting the
+environment variable(s) that PyInstaller uses to determine the temporary
+directory. This can, for example, be done in a wrapper shell script that
+sets the environment variable(s) before running the frozen application's
+executable.
+
+On POSIX systems, the environment variables used for temporary
+directory location are ``TMPDIR``, ``TEMP``, and ``TMP``, in that
+order; if none are defined (or the corresponding directories do not
+exist or cannot be used), ``/tmp``, ``/var/tmp``, and ``/usr/tmp`` are
+used as hard-coded fall-backs, in the specified order. The directory
+specified via the environment variable must exist (i.e., the application
+attempts to create only its own directory under the base temporary directory).
+
+On Windows, the default temporary directory location is determined via
+`GetTempPathW <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppathw>`_
+function (which looks at ``TMP`` and ``TEMP`` environment variables for
+initial temporary directory candidates).
+
+Using the :option:`--runtime-tmpdir` option
+-------------------------------------------
+
+The location of the temporary directory can be set statically, at compile
+time, using the :option:`--runtime-tmpdir` option. If this option is used,
+the bootloader will ignore temporary directory locations defined by
+the OS, and use the specified path. The path can be either absolute
+or relative (which makes it relative to the current working directory).
+
+Please use this option only if you know what you are doing.
+
+.. note::
+    On POSIX systems, PyInstaller's bootloader does **not** perform shell-style
+    environment variable expansion on the path string given via
+    :option:`--runtime-tmpdir` option. Therefore, using environment
+    variables (e.g., ``~`` or ``$HOME``) in the path will **not** work.
 
 
 .. _supporting multiple platforms:
@@ -437,6 +594,8 @@ Or you can apply the ``unicode()`` function to the object
 to reproduce the version text file.
 
 
+.. _macOS app bundles:
+
 Building macOS App Bundles
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -450,17 +609,37 @@ Either executable can be started from a Terminal command line.
 Standard input and output work as normal through that Terminal window.
 
 If you specify :option:`--windowed` with either option, the ``dist`` folder
-also contains a macOS application named :file:`myscript.app`.
+also contains a macOS app bundle named :file:`myscript.app`.
 
-As you probably know, an application is a special type of folder.
-The one built by PyInstaller contains a folder always named
-:file:`Contents` which contains:
+.. note::
+    Generating app bundles with onefile executables (i.e., using the
+    combination of :option:`--onefile` and :option:`--windowed` options),
+    while possible, is not recommended. Such app bundles are inefficient,
+    because they require unpacking on each run (and the unpacked content
+    might be scanned by the OS each time). Furthermore, onefile executables
+    will not work when signed/notarized with sandbox enabled (which
+    is a requirement for distribution of apps through Mac App Store).
 
-  + A folder :file:`Frameworks` which is empty.
-  + A folder :file:`Resources` that contains an icon file.
-  + A file :file:`Info.plist` that describes the app.
-  + A folder :file:`MacOS` that contains the the executable and
-    supporting files, just as in the :option:`--onedir` folder.
+As you are likely aware, an app bundle is a special type of folder.
+The one built by PyInstaller always contains a folder named
+:file:`Contents`, which contains:
+
+  + A file named :file:`Info.plist` that describes the app.
+  + A folder named :file:`MacOS` that contains the program executable.
+  + A folder named :file:`Frameworks` that contains the collected binaries
+    (shared libraries, python extensions) and nested .framework bundles.
+    It also contains symbolic links to data files and directories from
+    the :file:`Resources` directory.
+  + A folder named :file:`Resources` that contains the icon file and all
+    collected data files. It also contains symbolic links to binaries
+    and directories from the :file:`Resources` directory.
+
+.. note::
+    The contents of the :file:`Frameworks` and :file:`Resources` directories
+    are cross-linked between the two directories in an effort to
+    maintain an illusion of a single content directory (which is required
+    by some packages), while also trying to satisfy the Apple's file
+    placement requirements for codesigning.
 
 Use the :option:`--icon` argument to specify a custom icon for the application.
 It will be copied into the :file:`Resources` folder.
@@ -592,7 +771,8 @@ Building 32-bit Apps in macOS
           on modern versions of macOS, see :ref:`here <macos multi-arch support>`).
           However, PyInstaller still supports building 32-bit bootloader,
           and 32-bit/64-bit Python installers are still available from
-          python.org for (some) versions of Python 3.7.
+          python.org for (some) versions of Python 3.7 which PyInstaller dropped
+          support for in v6.0.
 
 Older versions of macOS supported both 32-bit and 64-bit executables.
 PyInstaller builds an app using the the word-length of the Python used to execute it.
@@ -680,6 +860,63 @@ When working with a 64-bit Python executable proceed as follows::
 
     $ export OBJECT_MODE=64
     $ pyinstaller <your arguments>
+
+
+.. _Platform-specific Notes - Cygwin:
+
+Cygwin
+------
+
+Cygwin-based Frozen Applications and ``cygwin1.dll``
+====================================================
+
+Under Cygwin, the PyInstaller's bootloader executable (and therefore the
+frozen application's executable) ends up being dynamically linked against
+the ``cygwin1.dll``. As noted under `Q 6.14 of the Cygwin's FAQ
+<https://www.cygwin.com/faq.html#faq.programming.static-linking>`_,
+the Cygwin library cannot be statically linked into an executable in
+order to obtain an independent, self-contained executable.
+
+This means that at run-time, the ``cygwin1.dll`` needs to be available
+to the frozen application's executable for it to be able to launch.
+Depending on the deployment scenario, this means that it needs to be
+either available in the environment (i.e., the environment's search path)
+or a copy of the DLL needs to be available *next to the executable*.
+
+On the other hand, Cygwin does not permit more than one copy of
+``cygwin1.dll``; or rather, it requires multiple copies of the DLL
+to be strictly separated, as each instance constitutes its own Cygwin
+installation/environment (see `Q 4.20 of the Cygwin FAQ
+<https://www.cygwin.com/faq.html#faq.using.multiple-copies>`_).
+Trying to run an executable with an adjacent copy of the DLL from an
+existing Cygwin environment will likely result in the application crashing.
+
+In practice, this means that if you want to create a frozen application
+that will run in an existing Cygwin environment, the application
+should not bundle a copy of ``cygwin1.dll``. On the other hand, if you
+want to create a frozen application that will run outside of a Cygwin
+environment (i.e., a "stand-alone" application that runs directly under
+Windows), the application will require a copy of ``cygwin1.dll`` -- and
+that copy needs to be placed *next to the program's executable*, regardless
+of whether ``onedir`` or ``onefile`` build mode is used.
+
+As PyInstaller cannot guess the deployment mode that you are pursuing,
+it makes no attempt to collect ``cygwin1.dll``. So if you want your
+application to run outside of an externally-provided Cygwin environment,
+you need to place a copy of ``cygwin1.dll`` next to the program's
+executable and distribute them together.
+
+.. note::
+    If you plan to create a "stand-alone" Cygwin-based frozen application
+    (i.e., distribute ``cygwin1.dll`` along with the executable), you will
+    likely want to build the bootloader with statically linked ``zlib``
+    library, in order to avoid a run-time dependency on ``cygz.dll``.
+
+    You can do so by passing ``--static-zlib`` option to ``waf`` when
+    manually building the bootloader before installing PyInstaller
+    from source, or by adding the option to ``PYINSTALLER_BOOTLOADER_WAF_ARGS``
+    environment variable if installing directly via ``pip install``.
+    For details, see :ref:`building the bootloader`.
 
 
 .. include:: _common_definitions.txt

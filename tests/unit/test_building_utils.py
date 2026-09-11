@@ -9,146 +9,179 @@
 # SPDX-License-Identifier: (GPL-2.0-or-later WITH Bootloader-exception)
 #-----------------------------------------------------------------------------
 
-import pytest
 import os
+import sys
 import pathlib
-from importlib.machinery import EXTENSION_SUFFIXES
+
+import pytest
 
 from PyInstaller.building import utils
+from PyInstaller.compat import is_termux
 
 
-def test_format_binaries_and_datas_not_found_raises_error(tmpdir):
+def test_format_binaries_and_datas_not_found_raises_error(tmp_path):
     datas = [('non-existing.txt', '.')]
-    tmpdir.join('existing.txt').ensure()
+    (tmp_path / 'existing.txt').touch()  # Create a file with different name, for sanity check.
     # TODO Tighten test when introducing PyInstaller.exceptions
     with pytest.raises(SystemExit):
-        utils.format_binaries_and_datas(datas, str(tmpdir))
+        utils.format_binaries_and_datas(datas, str(tmp_path))
 
 
-def test_format_binaries_and_datas_empty_src(tmpdir):
+def test_format_binaries_and_datas_empty_src(tmp_path):
     # `format_binaries_and_datas()` must disallow empty src in `binaries`/`datas` tuples, as those result in implicit
     # collection of the whole current working directory .
     datas = [('', '.')]
     with pytest.raises(SystemExit, match="Empty SRC is not allowed"):
-        utils.format_binaries_and_datas(datas, str(tmpdir))
+        utils.format_binaries_and_datas(datas, str(tmp_path))
 
 
-def test_format_binaries_and_datas_1(tmpdir):
-    def _(path):
-        return os.path.join(*path.split('/'))
+def test_format_binaries_and_datas_basic(tmp_path):
+    # (src, dest) tuples to be passed to format_binaries_and_datas()
+    DATAS = (
+        ('existing.txt', '.'),
+        ('other.txt', 'foo'),
+        ('*.log', 'logs'),
+        ('a/*.log', 'lll'),
+        ('a/here.tex', '.'),
+        ('b/[abc].tex', 'tex'),
+    )
 
-    datas = [
-        (_('existing.txt'), '.'),
-        (_('other.txt'), 'foo'),
-        (_('*.log'), 'logs'),
-        (_('a/*.log'), 'lll'),
-        (_('a/here.tex'), '.'),
-        (_('b/[abc].tex'), 'tex'),
-    ]
-
-    expected = set()
-    for dest, src in (
+    # Expected entries; they are listed as (src, dest) tuples for readability; the subsequent code transforms them into
+    # (dest, src) tuples format used by format_binaries_and_datas().
+    EXPECTED = (
         ('existing.txt', 'existing.txt'),
-        ('foo/other.txt', 'other.txt'),
-        ('logs/aaa.log', 'aaa.log'),
-        ('logs/bbb.log', 'bbb.log'),
-        ('lll/xxx.log', 'a/xxx.log'),
-        ('lll/yyy.log', 'a/yyy.log'),
-        ('here.tex', 'a/here.tex'),
-        ('tex/a.tex', 'b/a.tex'),
-        ('tex/b.tex', 'b/b.tex'),
-    ):
-        src = tmpdir.join(_(src)).ensure()
-        expected.add((_(dest), str(src)))
+        ('other.txt', 'foo/other.txt'),
+        ('aaa.log', 'logs/aaa.log'),
+        ('bbb.log', 'logs/bbb.log'),
+        ('a/xxx.log', 'lll/xxx.log'),
+        ('a/yyy.log', 'lll/yyy.log'),
+        ('a/here.tex', 'here.tex'),
+        ('b/a.tex', 'tex/a.tex'),
+        ('b/b.tex', 'tex/b.tex'),
+    )
 
-    # add some files which are not included
-    tmpdir.join(_('not.txt')).ensure()
-    tmpdir.join(_('a/not.txt')).ensure()
-    tmpdir.join(_('b/not.txt')).ensure()
+    # Normalize separator in source paths
+    datas = [(os.path.normpath(src), dest) for src, dest in DATAS]
 
-    res = utils.format_binaries_and_datas(datas, str(tmpdir))
-    assert res == expected
-
-
-def test_format_binaries_and_datas_with_bracket(tmpdir):
-    # See issue #2314: the filename contains brackets which are interpreted by glob().
-
-    def _(path):
-        return os.path.join(*path.split('/'))
-
-    datas = [(_('b/[abc].tex'), 'tex')]
-
+    # Convert the (src, dest) entries from EXPECTED into (dest, src) format, and turn `src` into full path.
     expected = set()
-    for dest, src in (('tex/[abc].tex', 'b/[abc].tex'),):
-        src = tmpdir.join(_(src)).ensure()
-        expected.add((_(dest), str(src)))
+    for src, dest in EXPECTED:
+        src_path = tmp_path / src
+        dest_path = pathlib.PurePath(dest)  # Normalize separators.
+        # Create the file
+        src_path.parent.mkdir(parents=True, exist_ok=True)
+        src_path.touch()
+        # Expected entry
+        expected.add((str(dest_path), str(src_path)))
 
-    # add some files which are not included
-    tmpdir.join(_('tex/not.txt')).ensure()
+    # Create some additional files that should not be included.
+    (tmp_path / 'not.txt').touch()
+    (tmp_path / 'a' / 'not.txt').touch()
+    (tmp_path / 'b' / 'not.txt').touch()
 
-    res = utils.format_binaries_and_datas(datas, str(tmpdir))
+    res = utils.format_binaries_and_datas(datas, str(tmp_path))
     assert res == expected
 
 
-def test_add_suffix_to_extension():
-    SUFFIX = EXTENSION_SUFFIXES[0]
-    # Each test case is a tuple of four values:
-    #  * input dest_name
-    #  * output (expected) dest_name
-    #  * src
-    #  * typecode
-    # where (dest_name, src_name, typecode) is a TOC entry tuple.
-    # All paths are in POSIX format (and are converted to OS-specific path during the test itself).
-    CASES = [
-        # Stand-alone extension module
-        ('mypkg',
-         'mypkg' + SUFFIX,
-         'lib38/site-packages/mypkg' + SUFFIX,
-         'EXTENSION'),
-        # Extension module nested in a package
-        ('pkg.subpkg._extension',
-         'pkg/subpkg/_extension' + SUFFIX,
-         'lib38/site-packages/pkg/subpkg/_extension' + SUFFIX,
-         'EXTENSION'),
-        # Built-in extension originating from lib-dynload
-        ('lib-dynload/_extension',
-         'lib-dynload/_extension' + SUFFIX,
-         'lib38/lib-dynload/_extension' + SUFFIX,
-         'EXTENSION'),
-    ]  # yapf: disable
+def test_format_binaries_and_datas_with_bracket(tmp_path):
+    # See issue #2314: the filename contains brackets which are interpreted by glob().
+    DATAS = (
+        (('b/[abc].tex'), 'tex'),
+    )  # yapf: disable
 
-    for case in CASES:
-        dest_name1 = str(pathlib.PurePath(case[0]))
-        dest_name2 = str(pathlib.PurePath(case[1]))
-        src_name = str(pathlib.PurePath(case[2]))
-        typecode = case[3]
+    EXPECTED = (
+        ('b/[abc].tex', 'tex/[abc].tex'),
+    )  # yapf: disable
 
-        toc = (dest_name1, src_name, typecode)
-        toc_expected = (dest_name2, src_name, typecode)
+    # Normalize separator in source paths
+    datas = [(os.path.normpath(src), dest) for src, dest in DATAS]
 
-        # Ensure that processing a TOC entry produces expected result.
-        toc2 = utils.add_suffix_to_extension(*toc)
-        assert toc2 == toc_expected
+    # Convert the (src, dest) entries from EXPECTED into (dest, src) format, and turn `src` into full path.
+    expected = set()
+    for src, dest in EXPECTED:
+        src_path = tmp_path / src
+        dest_path = pathlib.PurePath(dest)  # Normalize separators.
+        # Create the file
+        src_path.parent.mkdir(parents=True, exist_ok=True)
+        src_path.touch()
+        # Expected entry
+        expected.add((str(dest_path), str(src_path)))
 
-        # Ensure that processing an already-processed TOC entry leaves it unchanged (i.e., does not mangle it).
-        toc3 = utils.add_suffix_to_extension(*toc2)
-        assert toc3 == toc2
+    # Create some additional files that should not be included.
+    (tmp_path / 'tex').mkdir(parents=True, exist_ok=True)
+    (tmp_path / 'tex' / 'not.txt').touch()
+
+    res = utils.format_binaries_and_datas(datas, str(tmp_path))
+    assert res == expected
 
 
 def test_should_include_system_binary():
-    CASES = [
-        ('lib-dynload/any', '/usr/lib64/any', [], True),
-        ('libany', '/lib64/libpython.so', [], True),
-        ('any', '/lib/python/site-packages/any', [], True),
-        ('libany', '/etc/libany', [], True),
-        ('libany', '/usr/lib/libany', ['*any*'], True),
-        ('libany2', '/lib/libany2', ['libnone*', 'libany*'], True),
-        ('libnomatch', '/lib/libnomatch', ['libnone*', 'libany*'], False),
-    ]
+    python_dir = f'python{sys.version_info.major}.{sys.version_info.minor}'
+    python_lib = f'libpython{sys.version_info.major}.{sys.version_info.minor}.so'
+    if is_termux:
+        # NOTE: in Termux environment, /usr is symbolic link to /data/data/com.termux/files/usr
+        termux_usr = '/data/data/com.termux/files/usr'
+        CASES = (
+            # Python shared library; should be always included
+            (python_lib, f'{termux_usr}/lib/{python_lib}', [], True),
+            (python_lib, f'/usr/lib/{python_lib}', [], True),
+            # Python stdlib extension from lib-dynload directory; should be always included
+            (f'{python_dir}/lib-dynload/any.so', f'{termux_usr}/lib/{python_dir}/lib-dynload/any.so', [], True),
+            (f'{python_dir}/lib-dynload/any.so', f'/usr/lib/{python_dir}/lib-dynload/any.so', [], True),
+            # Shared library bundled with a package inside system's site-packages directory; should be always included.
+            ('mypackage/any.so', f'{termux_usr}/lib/{python_dir}/site-packages/mypackage/any.so', [], True),
+            ('mypackage/any.so', f'/usr/lib/{python_dir}/site-packages/mypackage/any.so', [], True),
+            # Some other (system) directory
+            ('libany.so', '/etc/libany.so', [], True),
+            ('libany.so', f'{termux_usr}/etc/libany.so', [], True),
+            ('libany.so', '/usr/etc/libany.so', [], True),
+            # Shared library in /data/data/com.termux/files/usr/lib (or /usr/lib), with various exception combinations.
+            ('libany.so', f'{termux_usr}/lib/libany.so', ['*any*'], True),
+            ('libany.so', '/usr/lib/libany.so', ['*any*'], True),
+            ('libany2.so', f'{termux_usr}/lib/libany2.so', ['libnone*', 'libany*'], True),
+            ('libany2.so', '/usr/lib/libany2.so', ['libnone*', 'libany*'], True),
+            ('libnomatch.so', f'{termux_usr}/lib/libnomatch.so', ['libnone*', 'libany*'], False),
+            ('libnomatch.so', '/usr/lib/libnomatch.so', ['libnone*', 'libany*'], False),
+            # Shared library in /system/lib; without and with exclusion exception
+            ('libc++.so', '/system/lib/libc++.so', [], False),
+            ('libc++.so', '/system/lib/libc++.so', ['libc*'], True),
+        )
+    else:
+        # NOTE: nowadays, /lib64 and /lib are symbolic links to their counterparts in /usr. For the sake of
+        # completeness, we explicitly test all four possibilities.
+        CASES = (
+            # Python shared library; should be always included
+            (python_lib, f'/lib64/{python_lib}', [], True),
+            (python_lib, f'/usr/lib64/{python_lib}', [], True),
+            (python_lib, f'/lib/{python_lib}', [], True),
+            (python_lib, f'/usr/lib/{python_lib}', [], True),
+            # Python stdlib extension from lib-dynload directory; should be always included
+            (f'{python_dir}/lib-dynload/any.so', f'/lib64/{python_dir}/lib-dynload/any.so', [], True),
+            (f'{python_dir}/lib-dynload/any.so', f'/usr/lib64/{python_dir}/lib-dynload/any.so', [], True),
+            (f'{python_dir}/lib-dynload/any.so', f'/lib/{python_dir}/lib-dynload/any.so', [], True),
+            (f'{python_dir}/lib-dynload/any.so', f'/usr/lib/{python_dir}/lib-dynload/any.so', [], True),
+            # Shared library bundled with a package inside system's site-packages directory; should be always included.
+            ('mypackage/any.so', f'/lib64/{python_dir}/site-packages/mypackage/any.so', [], True),
+            ('mypackage/any.so', f'/usr/lib64/{python_dir}/site-packages/mypackage/any.so', [], True),
+            ('mypackage/any.so', f'/lib/{python_dir}/site-packages/mypackage/any.so', [], True),
+            ('mypackage/any.so', f'/usr/lib/{python_dir}/site-packages/mypackage/any.so', [], True),
+            # Some other (system) directory
+            ('libany.so', '/etc/libany.so', [], True),
+            # Shared library in system library directory, with various exception combinations.
+            ('libany.so', '/lib64/libany.so', ['*any*'], True),
+            ('libany.so', '/usr/lib64/libany.so', ['*any*'], True),
+            ('libany.so', '/lib/libany.so', ['*any*'], True),
+            ('libany.so', '/usr/lib/libany.so', ['*any*'], True),
+            ('libany2.so', '/lib64/libany2.so', ['libnone*', 'libany*'], True),
+            ('libany2.so', '/usr/lib64/libany2.so', ['libnone*', 'libany*'], True),
+            ('libany2.so', '/lib/libany2.so', ['libnone*', 'libany*'], True),
+            ('libany2.so', '/lib64/libany2.so', ['libnone*', 'libany*'], True),
+            ('libnomatch.so', '/lib64/libnomatch.so', ['libnone*', 'libany*'], False),
+            ('libnomatch.so', '/usr/lib64/libnomatch.so', ['libnone*', 'libany*'], False),
+            ('libnomatch.so', '/lib/libnomatch.so', ['libnone*', 'libany*'], False),
+            ('libnomatch.so', '/usr/lib/libnomatch.so', ['libnone*', 'libany*'], False),
+        )
 
-    for case in CASES:
-        tuple = (case[0], case[1])
-        excepts = case[2]
-        expected = case[3]
-
-        assert utils._should_include_system_binary(tuple, excepts) == expected
+    for dest_path, src_path, exceptions, expected_result in CASES:
+        toc_entry = (dest_path, src_path, 'BINARY')
+        assert utils._should_include_system_binary(toc_entry, exceptions) == expected_result
